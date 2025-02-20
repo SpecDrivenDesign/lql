@@ -1,0 +1,86 @@
+name: Build and Test DSL Implementations
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Go Docker Image
+        run: docker build -t lql-go -f Dockerfile .
+
+      - name: Run Go Tests
+        run: docker run --rm lql-go test --test-file=testcases.yml --verbose
+
+      - name: Run Go Benchmark
+        run: docker run --rm lql-go test --test-file=testcases.yml --verbose --benchmark
+
+  # python:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+
+  #     - name: Build Python Docker Image
+  #       run: docker build -t dsl-python -f python.Dockerfile .
+
+  #     - name: Run Python Tests
+  #       run: docker run --rm dsl-python --fail-fast --verbose
+
+  # php:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+
+  #     - name: Build PHP Docker Image
+  #       run: docker build -t dsl-php -f php.Dockerfile .
+
+  #     - name: Run PHP Tests
+  #       run: docker run --rm dsl-php --fail-fast --verbose
+
+  # js:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+
+  #     - name: Build JS Docker Image
+  #       run: docker build -t dsl-js -f js.Dockerfile .
+
+  #     - name: Run JS Tests
+  #       run: docker run --rm dsl-js
+
+  # java:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+
+  #     - name: Build Java Docker Image
+  #       run: docker build -t dsl-java -f java.Dockerfile .
+
+  #     - name: Run Java Tests
+  #       run: docker run --rm dsl-java
+
+  # cs:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+
+  #     - name: Build C# Docker Image
+  #       run: docker build -t dsl-cs -f cs.Dockerfile .
+
+  #     - name: Run C# Tests
+  #       run: docker run --rm dsl-cs

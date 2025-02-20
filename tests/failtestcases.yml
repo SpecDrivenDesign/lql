@@ -1,0 +1,75 @@
+# All of these test cases WILL FAIL.
+- description: "Logical error 1: Syntactically and semantically correct, simply failing test case."
+  context:
+    a: 10
+  expression: "$a == 11"
+  expectedResult: true
+
+- description: "Runtime Error 1: Missing field (top-level)"
+  context: {}
+  expression: "$missingField"
+  expectedResult: true
+
+- description: "Runtime Error 2: invalid function"
+  context:
+    a: 10
+  expression: "ifCond() == 10"
+  expectedResult: true
+
+- description: "Lexical Error 1: 12..3"
+  context: { }
+  expression: "12..3"
+  expectedResult: 12.3
+
+- description: "Syntax Error 1: AND true"
+  context: {}
+  expression: "AND true"
+  expectedResult: true
+
+- description: "Syntax Error 2: Bare identifier"
+  context:
+    a: 10
+  expression: "a == 10"
+  expectedResult: true
+
+- description: "Semantic Error 1: hello AND true"
+  context: { }
+  expression: "\"hello\" AND true"
+  expectedResult: true
+
+- description: "Arrow testing: param 1"
+  context: { }
+  expression: "array.first(null)"
+  expectedResult: true
+
+- description: "Arrow testing: param 2"
+  context: { }
+  expression: "array.find([], null, null)"
+  expectedResult: true
+
+- description: "Arrow testing: param 3"
+  context: { }
+  expression: "string.indexOf(\"hello\", \"\", null)"
+  expectedResult: true
+
+- description: "Arrow testing: param 4"
+  context: { }
+  expression: "string.replace(\"hello\", \"h\", \"j\", null)"
+  expectedResult: true
+
+- description: "Passing 0 params to method that requires params"
+  context: { }
+  expression: "string.replace()"
+  expectedResult: true
+
+- description: "Missing library"
+  context: { }
+  expression: "missing.replace()"
+  expectedResult: true
+
+
+## NOT WORKING SECTION
+- description: "Invalid conversion"
+  context: { }
+  expression: "1 + 1.5"
+  expectedResult: 2.5
