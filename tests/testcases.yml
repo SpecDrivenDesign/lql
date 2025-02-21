@@ -10864,3 +10864,51 @@
   expectedResult:
     - { name: "Tom" }
     - { name: "Tom" }
+
+- description: "Comment Test: Ignore comment line"
+  context: {}
+  expression: |
+    # This is a comment that should be skipped
+    1 + 1
+  expectedResult: 2
+- description: "Comment Test: Leading whitespace comment line"
+  context: {}
+  expression: |
+    # This comment with leading spaces should be ignored
+    2 * 3
+  expectedResult: 6
+
+- description: "Comment Test: Interleaved comment in multi-line expression"
+  context: {}
+  expression: |
+    2 +
+    # This comment should be ignored in the middle of the expression
+    3
+  expectedResult: 5
+
+- description: "Comment Test: Multiple consecutive comment lines"
+  context: {}
+  expression: |
+    # First comment line
+    # Second comment line
+    # Third comment line
+    4 + 1
+  expectedResult: 5
+
+- description: "Comment Test: Trailing comment line"
+  context: {}
+  expression: |
+    5 - 2
+    # This is a trailing comment that should be ignored
+  expectedResult: 3
+
+
+- description: "Unicode Escape Test: Should interpret \\uXXXX correctly"
+  context: {}
+  expression: "\"Hello \\u0041\" == \"Hello A\""
+  expectedResult: true
+
+- description: "Short-Circuit Evaluation Test: true || (1/0) yields true"
+  context: {}
+  expression: "true || (1 / 0)"
+  expectedResult: true
