@@ -1168,90 +1168,92 @@ The expression `myLib.func(...).field` indicates that the function call is evalu
    ```
 
 ---
+## 9. Error Reporting Format (Updated)
 
-## 9. Error Reporting Format
+All errors produced by the DSL engine MUST include at least the following fields:
 
-Implementations **MUST** report errors with at least the following fields:
-- **errorType**
-- **message**
-- **line**
-- **column**
-- **snippet** (if available)
+- **errorType:** One of the following (or a library-specific error type):  
+  `LexicalError`, `SyntaxError`, `SemanticError`, `RuntimeError`, `TypeError`, `DivideByZeroError`, `ReferenceError`, `UnknownIdentifierError`, `UnknownOperatorError`, `FunctionCallError`, `ParameterError`, or `ArrayOutOfBoundsError`.
 
-The snippet **SHOULD** include the relevant source line with an arrow (`^`) indicating the offending token or region.
+- **message:** A descriptive message explaining the error.
+- **line:** The source line number where the error was detected.
+- **column:** The column number in the source where the error was detected.
+- **snippet:** A snippet of the source code showing the relevant line with an arrow (`^`) under the offending token.
 
-### 9.1 Sample Error Snippets
+### Format
 
-1. **Lexical Error (Unclosed String):**
-   ```
-   1 | $user.name == "Alice
-                         ^
-   LexicalError: Unclosed string literal at line 1, column 16
-   ```
+Each error message MUST be formatted as follows:
 
-2. **Lexical Error (Malformed Numeric):**
-   ```
-   2 | $order.total == 12..3
-                            ^
-   LexicalError: Malformed numeric literal at line 1, column 21
-   ```
+```
+<ErrorType>: <message> at line <line>, column <column>
+    <source line>
+    <pointer line with a caret (^) indicating the error location>
+```
 
-3. **Syntax Error (Bare Identifier Usage for Boolean):**
-   ```
-   1 | $user.isActive == True
-                         ^
-   SyntaxError: Bare identifier 'True' is not allowed at line 1, column 16
-   ```
+For example, a **LexicalError** due to an unclosed string literal should be reported as:
 
-4. **Syntax Error (Unexpected Operator):**
-   ```
-   3 | AND $user.age == 10
-   ^
-   SyntaxError: Unexpected operator 'AND' at line 3, column 1
-   ```
+```
+LexicalError: Unclosed string literal at line 1, column 16
+    $user.name == "Alice
+                ^
+```
 
-5. **Syntax Error (Mismatched Bracket):**
-   ```
-   4 | [1, 2, 3))
-            ^
-   SyntaxError: Mismatched closing parenthesis at line 1, column 8
-   ```
+Similarly, a **SyntaxError** for an expected closing parenthesis might appear as:
 
-6. **Semantic Error (Relational Operator on Boolean):**
-   ```
-   1 | $user.isActive < false
-                    ^
-   SemanticError: '<' operator not allowed on boolean type at line 1, column 14
-   ```
-
-7. **Semantic Error (Arithmetic on Null):**
-   ```
-   2 | null + 5
-       ^
-   SemanticError: Cannot use '+' operator on null at line 2, column 2
-   ```
-
-8. **Runtime Error (Missing Field):**
-   ```
-   1 | $user.isActive == true
-       ^
-   RuntimeError: field 'user' not found at line 1, column 1
-   ```
-
-9. **Runtime Error (Negative Array Index):**
-   ```
-   2 | $items[-1]
+```
+SyntaxError: Expected RPAREN at line 1, column 8
+    ($a + $b
            ^
-   RuntimeError: Invalid array index -1 at line 1, column 8
-   ```
+```
 
-10. **Runtime Error (Invalid Member Access on Non‑array):**
-    ```
-     1 | $obj["list"]
-     2 |    [0].foo
-              ^
-    RuntimeError: '$obj["list"]' is not an array at line 2, column 5
-    ```
+A **SemanticError** such as applying the '+' operator to non‑numeric types should be reported as:
+
+```
+SemanticError: '+' operator used on non‑numeric type at line 1, column 4
+    $a + "hello"
+         ^
+```
+
+Other error types follow the same pattern. For example:
+
+- **TypeError:**  
+  `TypeError: <description> at line <line>, column <column>`
+
+- **DivideByZeroError:**  
+  `DivideByZeroError: <description> at line <line>, column <column>`
+
+- **ReferenceError:**  
+  `ReferenceError: <description> at line <line>, column <column>`
+
+- **UnknownIdentifierError:**  
+  `UnknownIdentifierError: <description> at line <line>, column <column>`
+
+- **UnknownOperatorError:**  
+  `UnknownOperatorError: <description> at line <line>, column <column>`
+
+- **FunctionCallError:**  
+  `FunctionCallError: <description> at line <line>, column <column>`
+
+- **ParameterError:**  
+  `ParameterError: <description> at line <line>, column <column>`
+
+- **ArrayOutOfBoundsError:**  
+  `ArrayOutOfBoundsError: <description> at line <line>, column <column>`
+
+### Implementation Details
+
+- The engine uses a consistent format by employing Go’s `fmt.Sprintf` with a template such as:  
+  `"<ErrorType>: %s at line %d, column %d"`  
+  where `%s` is replaced by the error message, and `%d` by the line and column numbers.
+  
+- A helper function (`GetErrorContext`) splits the source code into lines and produces a “pointer” line where all characters before the error column are replaced by dashes (`-`), ending with a caret (`^`), for example:
+
+  ```
+      $user.name == "Alice
+                  ^
+  ```
+
+- If ANSI colors are enabled (via environment settings), the snippet and error message parts may be colorized accordingly.
 
 ---
 
