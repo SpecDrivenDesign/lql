@@ -10864,3 +10864,50 @@
   expectedResult:
     - { name: "Tom" }
     - { name: "Tom" }
+
+
+
+- description: "Lexical Test: Comment Line Not Ignored"
+  context: {}
+  expression: "# This is a comment"
+  expectedError: "LexicalError"
+  expectedErrorMessage: "Unexpected character: # at line 1, column 1"
+
+- description: "Syntax Test: Trailing Comma in Object Literal"
+  context: {}
+  expression: "{ key: 1, }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Trailing commas are not allowed at line 1, column"  # exact column may vary
+
+- description: "Lexical Test: Unicode Escape Sequence in String"
+  context: {}
+  expression: "\"Hello \\u1234\""
+  expectedError: "LexicalError"
+  expectedErrorMessage: "Invalid escape sequence: \\u at line 1, column"  # column information may vary
+
+- description: "Runtime Test: Mixed-Type Array Sorting"
+  context: {}
+  expression: "array.sort([1, \"two\", 3], true)"
+  expectedError: "RuntimeError"
+  expectedErrorMessage: "array.sort: elements are not comparable at line 1, column"
+
+- description: "Semantic Test: Duplicate Keys in Object Literal"
+  context: {}
+  expression: "{ a: 1, a: 2 }"
+  expectedError: "SemanticError"
+  expectedErrorMessage: "Duplicate key 'a' detected at line 1, column"  # exact position may vary
+
+- description: "Core Test: Short-Circuit Evaluation for OR"
+  context:
+    user:
+      age: 20
+  expression: "$user.age > 18 || $user.nonexistent.someField"
+  expectedResult: true
+
+- description: "Runtime Test: Division by Zero"
+  context:
+    a: 10
+    b: 0
+  expression: "$a / $b"
+  expectedError: "RuntimeError"
+  expectedErrorMessage: "division by zero at line 1, column"
