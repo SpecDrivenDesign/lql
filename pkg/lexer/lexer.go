@@ -9,10 +9,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/RyanCopley/expression-parser/pkg/tokens"
+	"strconv"
 	"strings"
 
 	"github.com/RyanCopley/expression-parser/pkg/errors"
 )
+
+// isHexDigit returns true if ch is a valid hexadecimal digit.
+func isHexDigit(ch byte) bool {
+	return ('0' <= ch && ch <= '9') ||
+		('a' <= ch && ch <= 'f') ||
+		('A' <= ch && ch <= 'F')
+}
 
 // Lexer holds the state of the lexer.
 type Lexer struct {
@@ -72,10 +80,23 @@ func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
 }
 
-// skipWhitespace skips over spaces, tabs, and newlines.
+// skipWhitespace skips over spaces, tabs, newlines, and also skips comments (lines starting with "#").
 func (l *Lexer) skipWhitespace() {
+	// Skip normal whitespace.
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 		l.readChar()
+	}
+	// If a comment is encountered (line starts with "#"), skip until newline.
+	for l.ch == '#' {
+		for l.ch != '\n' && l.ch != 0 {
+			l.readChar()
+		}
+		// Skip the newline.
+		l.readChar()
+		// Skip any whitespace after the comment.
+		for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+			l.readChar()
+		}
 	}
 }
 
@@ -300,21 +321,39 @@ func (l *Lexer) readString(quote byte) (string, error) {
 	l.readChar() // skip opening quote
 	for l.ch != 0 {
 		if escaped {
-			switch l.ch {
-			case 'n':
-				sb.WriteByte('\n')
-			case 'r':
-				sb.WriteByte('\r')
-			case 't':
-				sb.WriteByte('\t')
-			case '\\':
-				sb.WriteByte('\\')
-			case '"':
-				sb.WriteByte('"')
-			case '\'':
-				sb.WriteByte('\'')
-			default:
-				return "", errors.NewLexicalError("Invalid escape sequence: \\"+string(l.ch), l.line, l.column)
+			if l.ch == 'u' {
+				// Read next 4 hexadecimal digits.
+				hexDigits := ""
+				for i := 0; i < 4; i++ {
+					l.readChar()
+					if !isHexDigit(l.ch) {
+						return "", errors.NewLexicalError("Invalid unicode escape sequence", l.line, l.column)
+					}
+					hexDigits += string(l.ch)
+				}
+				code, err := strconv.ParseInt(hexDigits, 16, 32)
+				if err != nil {
+					return "", errors.NewLexicalError("Invalid unicode escape sequence", l.line, l.column)
+				}
+				sb.WriteRune(rune(code))
+				escaped = false
+			} else {
+				switch l.ch {
+				case 'n':
+					sb.WriteByte('\n')
+				case 'r':
+					sb.WriteByte('\r')
+				case 't':
+					sb.WriteByte('\t')
+				case '\\':
+					sb.WriteByte('\\')
+				case '"':
+					sb.WriteByte('"')
+				case '\'':
+					sb.WriteByte('\'')
+				default:
+					return "", errors.NewLexicalError("Invalid escape sequence: \\"+string(l.ch), l.line, l.column)
+				}
 			}
 			escaped = false
 		} else {
@@ -332,9 +371,6 @@ func (l *Lexer) readString(quote byte) (string, error) {
 	return "", errors.NewLexicalError("Unclosed string literal", startLine, startColumn)
 }
 
-// ExportTokens serializes tokens into a binary format.
-// For tokens with fixed literals, only the token code is written;
-// otherwise a 1-byte length prefix and literal bytes are appended.
 func (l *Lexer) ExportTokens() ([]byte, error) {
 	var buf bytes.Buffer
 	for {
@@ -366,7 +402,6 @@ func (l *Lexer) ExportTokens() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ExportTokensSigned exports tokens and signs the output using the provided RSA private key.// ExportTokensSigned exports tokens and signs the output using the provided RSA private key.
 func (l *Lexer) ExportTokensSigned(priv *rsa.PrivateKey) ([]byte, error) {
 	tokenData, err := l.ExportTokens()
 	if err != nil {
@@ -379,12 +414,10 @@ func (l *Lexer) ExportTokensSigned(priv *rsa.PrivateKey) ([]byte, error) {
 		return nil, err
 	}
 
-	// Define the maximum allowed token data length as uint32's max value.
 	if len(tokenData) > int(^uint32(0)) {
 		return nil, fmt.Errorf("token data length %d exceeds maximum allowed size", len(tokenData))
 	}
 
-	// Now it is safe to cast len(tokenData) to uint32.
 	tokenLen := uint32(len(tokenData))
 
 	var buf bytes.Buffer
@@ -398,4 +431,3 @@ func (l *Lexer) ExportTokensSigned(priv *rsa.PrivateKey) ([]byte, error) {
 
 	return buf.Bytes(), nil
 }
-

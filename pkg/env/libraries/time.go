@@ -5,12 +5,12 @@ import (
 	"github.com/RyanCopley/expression-parser/pkg/param"
 	"github.com/RyanCopley/expression-parser/pkg/types"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/RyanCopley/expression-parser/pkg/errors"
 )
 
-// TimeValue represents a time value.
 type TimeValue struct {
 	EpochMillis int64
 	Zone        string
@@ -23,7 +23,6 @@ func newTimeValue(t time.Time) TimeValue {
 	}
 }
 
-// TimeLib implements time-related functions.
 type TimeLib struct{}
 
 func NewTimeLib() *TimeLib {
@@ -208,6 +207,10 @@ func (t *TimeLib) Call(functionName string, args []param.Arg, line, col, parenLi
 		formatStr, ok := arg1.Value.(string)
 		if !ok {
 			return nil, errors.NewTypeError("time.format: second argument must be string", arg1.Line, arg1.Column)
+		}
+		// Use ISO8601 (RFC3339Nano) as default if format string is empty.
+		if strings.TrimSpace(formatStr) == "" {
+			formatStr = time.RFC3339Nano
 		}
 		loc, err := time.LoadLocation(tv.Zone)
 		if err != nil {
