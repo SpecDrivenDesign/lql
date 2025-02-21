@@ -586,6 +586,11 @@ func (p *Parser) parseObjectLiteral() (ast.Expression, error) {
 			return nil, errors.NewSyntaxError("Expected identifier or string as object key", p.curToken.Line, p.curToken.Column)
 		}
 
+		// Check for duplicate key.
+		if _, exists := fields[key]; exists {
+			return nil, errors.NewSemanticError(fmt.Sprintf("Duplicate key '%s' detected", key), p.curToken.Line, p.curToken.Column)
+		}
+
 		if !p.peekTokenIs(tokens.TokenColon) {
 			return nil, errors.NewSyntaxError("Expected ':' after object key", p.peekToken.Line, p.peekToken.Column)
 		}
@@ -604,6 +609,10 @@ func (p *Parser) parseObjectLiteral() (ast.Expression, error) {
 		fields[key] = valueExpr
 
 		if p.curTokenIs(tokens.TokenComma) {
+			// Detect trailing comma.
+			if p.peekTokenIs(tokens.TokenRightCurly) {
+				return nil, errors.NewSyntaxError("Trailing comma not allowed in object literal", p.peekToken.Line, p.peekToken.Column)
+			}
 			if err := p.nextToken(); err != nil {
 				return nil, err
 			}

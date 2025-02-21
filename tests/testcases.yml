@@ -10912,3 +10912,159 @@
   context: {}
   expression: "true || (1 / 0)"
   expectedResult: true
+
+
+- description: "Syntax Error: Trailing comma in object literal"
+  context: {}
+  expression: "{ key: 1, }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Trailing comma not allowed in object literal"
+
+- description: "Valid Object Literal: Two keys"
+  context: {}
+  expression: "{ a: 1, b: 2 }"
+  expectedResult:
+    a: 1
+    b: 2
+
+- description: "Valid Object Literal: Mixed quoted and unquoted keys"
+  context: {}
+  expression: "{ \"a\": 1, b: 2 }"
+  expectedResult:
+    a: 1
+    b: 2
+
+- description: "Valid Nested Object Literal"
+  context: {}
+  expression: "{ a: { b: 2 } }"
+  expectedResult:
+    a:
+      b: 2
+
+- description: "Valid Empty Object Literal"
+  context: {}
+  expression: "{}"
+  expectedResult: {}
+
+- description: "Valid Object Literal: Multiple Field Types"
+  context: {}
+  expression: "{ a: 1, b: \"hello\", c: true }"
+  expectedResult:
+    a: 1
+    b: "hello"
+    c: true
+
+- description: "Valid Object Literal: Quoted key with spaces"
+  context: {}
+  expression: "{ \"first name\": \"Alice\" }"
+  expectedResult:
+    "first name": "Alice"
+
+- description: "Syntax Error: Trailing comma with multiple fields"
+  context: {}
+  expression: "{ a: 1, b: 2, }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Trailing comma not allowed in object literal"
+- description: "Valid Object Literal: Single key-value pair"
+  context: {}
+  expression: "{ key: 42 }"
+  expectedResult:
+    key: 42
+
+- description: "Valid Object Literal: Multiple primitives"
+  context: {}
+  expression: "{ num: 100, str: \"hello\", bool: false, nothing: null }"
+  expectedResult:
+    num: 100
+    str: "hello"
+    bool: false
+    nothing: null
+
+- description: "Valid Object Literal: Nested object"
+  context: {}
+  expression: "{ outer: { inner: \"value\" } }"
+  expectedResult:
+    outer:
+      inner: "value"
+
+- description: "Valid Object Literal: Nested array"
+  context: {}
+  expression: "{ arr: [1, 2, 3] }"
+  expectedResult:
+    arr:
+      - 1
+      - 2
+      - 3
+
+- description: "Valid Object Literal: Arithmetic expression as value"
+  context: {}
+  expression: "{ calc: (2+3*4) }"
+  expectedResult:
+    calc: 14
+
+- description: "Syntax Error: Missing colon between key and value"
+  context: {}
+  expression: "{ key 42 }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Expected ':' after object key"
+
+- description: "Syntax Error: Missing value after colon"
+  context: {}
+  expression: "{ key: }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Unexpected token } at line 1, column 8"
+
+- description: "Syntax Error: Missing comma between fields"
+  context: {}
+  expression: "{ a: 1 b: 2 }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Expected ',' or '}' after object field"
+
+- description: "Syntax Error: Missing closing curly brace"
+  context: {}
+  expression: "{ a: 1, b: 2"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Expected ',' or '}' after object field at line 1, column 13"
+
+- description: "Valid Object Literal: Extra whitespace"
+  context: {}
+  expression: "{    a:   1  ,    b:   2   }"
+  expectedResult:
+    a: 1
+    b: 2
+
+- description: "Valid Object Literal: Quoted key with hyphen"
+  context: {}
+  expression: "{ \"first-name\": \"Alice\" }"
+  expectedResult:
+    "first-name": "Alice"
+
+- description: "Valid Object Literal: Quoted key with special characters"
+  context: {}
+  expression: "{ \"@special!\": 123 }"
+  expectedResult:
+    "@special!": 123
+
+- description: "Syntax Error: Unquoted key with invalid character (hyphen)"
+  context: {}
+  expression: "{ first-name: \"Alice\" }"
+  expectedError: "SyntaxError"
+  expectedErrorMessage: "Expected ':' after object key at line 1, column 8"
+
+- description: "Valid Object Literal: Nested object with multiple fields"
+  context: {}
+  expression: "{ user: { name: \"Bob\", age: 30 }, active: true }"
+  expectedResult:
+    user:
+      name: "Bob"
+      age: 30
+    active: true
+
+- description: "Valid Object Literal: Value as an array literal"
+  context: {}
+  expression: "{ numbers: [10, 20, 30] }"
+  expectedResult:
+    numbers:
+      - 10
+      - 20
+      - 30
