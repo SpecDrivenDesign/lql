@@ -2,9 +2,9 @@ package libraries
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
-	"github.com/RyanCopley/expression-parser/pkg/param"
-	"github.com/RyanCopley/expression-parser/pkg/types"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
 	"math"
 )
 
@@ -127,6 +127,8 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			defaultVal = args[2].Value
 		}
 		sum := 0.0
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
 		for _, elem := range arr {
 			var num interface{}
 			if subfield != "" {
@@ -155,7 +157,19 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			if !ok {
 				return nil, errors.NewTypeError("math.sum: element is not numeric", arg0.Line, arg0.Column)
 			}
+			// Enforce uniform numeric type: no implicit conversion between int and float.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
 			sum += nf
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(sum), nil
 		}
 		return sum, nil
 
@@ -192,6 +206,8 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			return nil, errors.NewFunctionCallError("math.min: array is empty", arg0.Line, arg0.Column)
 		}
 		var m float64
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
 		first := true
 		for _, elem := range arr {
 			var num interface{}
@@ -221,6 +237,15 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			if !ok {
 				return nil, errors.NewTypeError("math.min: element is not numeric", arg0.Line, arg0.Column)
 			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
 			if first {
 				m = nf
 				first = false
@@ -229,6 +254,9 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 					m = nf
 				}
 			}
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(m), nil
 		}
 		return m, nil
 
@@ -265,6 +293,8 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			return nil, errors.NewFunctionCallError("math.max: array is empty", arg0.Line, arg0.Column)
 		}
 		var m float64
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
 		first := true
 		for _, elem := range arr {
 			var num interface{}
@@ -294,6 +324,15 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			if !ok {
 				return nil, errors.NewTypeError("math.max: element is not numeric", arg0.Line, arg0.Column)
 			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
 			if first {
 				m = nf
 				first = false
@@ -302,6 +341,9 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 					m = nf
 				}
 			}
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(m), nil
 		}
 		return m, nil
 
@@ -339,6 +381,8 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 		}
 		sum := 0.0
 		count := 0
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
 		for _, elem := range arr {
 			var num interface{}
 			if subfield != "" {
@@ -358,9 +402,19 @@ func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLi
 			if !ok {
 				return nil, errors.NewTypeError("math.avg: element is not numeric", arg0.Line, arg0.Column)
 			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
 			sum += nf
 			count++
 		}
+		// For average, always return a float (to account for fractional averages).
 		return sum / float64(count), nil
 
 	default:

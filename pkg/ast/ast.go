@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/RyanCopley/expression-parser/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
 )
 
 // Expression interface represents an AST node that can be evaluated.

@@ -2,13 +2,13 @@ package parser
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/ast/expressions"
-	"github.com/RyanCopley/expression-parser/pkg/tokens"
-	"github.com/RyanCopley/expression-parser/pkg/types"
+	"github.com/SpecDrivenDesign/lql/pkg/ast/expressions"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
 	"strings"
 
-	"github.com/RyanCopley/expression-parser/pkg/ast"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
 )
 
 // TokenStream represents a stream of tokens.

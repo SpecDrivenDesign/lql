@@ -2,7 +2,7 @@ package expressions
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
 )
 
 // LiteralExpr represents a literal value.

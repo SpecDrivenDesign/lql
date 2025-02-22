@@ -1,7 +1,7 @@
 package env
 
 import (
-	libraries2 "github.com/RyanCopley/expression-parser/pkg/env/libraries"
+	libraries2 "github.com/SpecDrivenDesign/lql/pkg/env/libraries"
 )
 
 // Environment holds the available libraries.

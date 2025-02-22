@@ -1,6 +1,6 @@
 package env
 
-import "github.com/RyanCopley/expression-parser/pkg/param"
+import "github.com/SpecDrivenDesign/lql/pkg/param"
 
 // ILibrary is the interface for DSL libraries.
 type ILibrary interface {

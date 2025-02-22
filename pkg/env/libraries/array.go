@@ -2,9 +2,9 @@ package libraries
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
-	"github.com/RyanCopley/expression-parser/pkg/param"
-	"github.com/RyanCopley/expression-parser/pkg/types"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
 	"sort"
 )
 
@@ -186,6 +186,19 @@ func (a *ArrayLib) Call(functionName string, args []param.Arg, line, col, parenL
 			isString = true
 		} else {
 			return nil, errors.NewTypeError("array.sort: elements are not comparable", arg0.Line, arg0.Column)
+		}
+		// Enforce uniform numeric type for numeric arrays.
+		if isNumeric {
+			firstIsInt := types.IsInt(first)
+			for _, e := range arr {
+				if _, ok := types.ToFloat(e); ok {
+					if types.IsInt(e) != firstIsInt {
+						return nil, errors.NewTypeError("array.sort: mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+					}
+				} else {
+					return nil, errors.NewTypeError("array.sort: element is not numeric", arg0.Line, arg0.Column)
+				}
+			}
 		}
 		sorted := make([]interface{}, len(arr))
 		copy(sorted, arr)

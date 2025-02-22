@@ -2,10 +2,10 @@ package expressions
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/ast"
-	"github.com/RyanCopley/expression-parser/pkg/env"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
-	"github.com/RyanCopley/expression-parser/pkg/types"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
 	"strings"
 )
 

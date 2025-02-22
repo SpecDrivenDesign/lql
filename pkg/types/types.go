@@ -2,7 +2,7 @@ package types
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
 	"math"
 	"strconv"
 	"strings"
@@ -121,6 +121,12 @@ func ConvertToInterfaceSlice(val interface{}) ([]interface{}, bool) {
 		}
 		return s, true
 	case []float64:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
+	case []string:
 		s := make([]interface{}, len(v))
 		for i, e := range v {
 			s[i] = e
