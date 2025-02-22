@@ -11040,131 +11040,131 @@
 
 
 
-- description: "CastToIntArray with numeric strings"
+- description: "intArray with numeric strings"
   context: {}
-  expression: "type.castToIntArray([\"1\", \"2\", \"3\"])"
+  expression: "type.intArray([\"1\", \"2\", \"3\"])"
   expectedResult: [1, 2, 3]
 
-- description: "CastToIntArray with non‑numeric element"
+- description: "intArray with non‑numeric element"
   context: {}
-  expression: "type.castToIntArray([\"1\", \"foo\", \"3\"])"
+  expression: "type.intArray([\"1\", \"foo\", \"3\"])"
   expectedError: "FunctionCallError"
   expectedErrorMessage: "element at index 1 (foo) is not convertible to int"
 
-- description: "CastToFloatArray with mixed numeric types"
+- description: "floatArray with mixed numeric types"
   context: {}
-  expression: "type.castToFloatArray([\"1.0\", 2, 3])"
+  expression: "type.floatArray([\"1.0\", 2, 3])"
   expectedResult: [1.0, 2.0, 3.0]
 
-- description: "CastToStringArray with mixed types"
+- description: "stringArray with mixed types"
   context: {}
-  expression: "type.castToStringArray([1, \"two\", 3.0])"
+  expression: "type.stringArray([1, \"two\", 3.0])"
   expectedResult: ["1", "two", "3"]
 
-- description: "Math.sum with castToIntArray"
+- description: "Math.sum with intArray"
   context: {}
-  expression: "math.sum(type.castToIntArray([\"1\", \"2\", \"3\"]))"
+  expression: "math.sum(type.intArray([\"1\", \"2\", \"3\"]))"
   expectedResult: 6
 
-- description: "Math.avg with castToFloatArray"
+- description: "Math.avg with floatArray"
   context: {}
-  expression: "math.avg(type.castToFloatArray([\"1.0\", 2, \"3.0\"]))"
+  expression: "math.avg(type.floatArray([\"1.0\", 2, \"3.0\"]))"
   expectedResult: 2.0
 
-- description: "String.join with castToStringArray"
+- description: "String.join with stringArray"
   context: {}
-  expression: "string.join(type.castToStringArray([1, 2, 3]), \"-\")"
+  expression: "string.join(type.stringArray([1, 2, 3]), \"-\")"
   expectedResult: "1-2-3"
 
-- description: "Math.sum with castToIntArray on mixed valid numeric types"
+- description: "Math.sum with intArray on mixed valid numeric types"
   context: {}
-  expression: "math.sum(type.castToIntArray([\"10\", 20, 30.0]))"
+  expression: "math.sum(type.intArray([\"10\", 20, 30.0]))"
   expectedResult: 60
 
-- description: "CastToIntArray with boolean element (should error)"
+- description: "intArray with boolean element (should error)"
   context: {}
-  expression: "type.castToIntArray([\"5\", true, \"7\"])"
+  expression: "type.intArray([\"5\", true, \"7\"])"
   expectedError: "FunctionCallError"
   expectedErrorMessage: "element at index 1 (true) is not convertible to int"
 
-- description: "CastToFloatArray with non‑numeric element"
+- description: "floatArray with non‑numeric element"
   context: {}
-  expression: "type.castToFloatArray([\"1.0\", \"bar\", 3])"
+  expression: "type.floatArray([\"1.0\", \"bar\", 3])"
   expectedError: "FunctionCallError"
   expectedErrorMessage: "element at index 1 (bar) is not convertible to float"
 
-- description: "CastToStringArray with all strings"
+- description: "stringArray with all strings"
   context: {}
-  expression: "type.castToStringArray([\"a\", \"b\", \"c\"])"
+  expression: "type.stringArray([\"a\", \"b\", \"c\"])"
   expectedResult: ["a", "b", "c"]
 
-- description: "Array.sort with castToIntArray ascending"
+- description: "Array.sort with intArray ascending"
   context: {}
-  expression: "array.sort(type.castToIntArray([\"3\", \"1\", \"2\"]), true)"
+  expression: "array.sort(type.intArray([\"3\", \"1\", \"2\"]), true)"
   expectedResult: [1, 2, 3]
 
-- description: "Array.sort with castToFloatArray descending"
+- description: "Array.sort with floatArray descending"
   context: {}
-  expression: "array.sort(type.castToFloatArray([\"3.0\", 1, \"2.0\"]), false)"
+  expression: "array.sort(type.floatArray([\"3.0\", 1, \"2.0\"]), false)"
   expectedResult: [3.0, 2.0, 1.0]
 
-- description: "Math.pow using castToIntArray values"
+- description: "Math.pow using intArray values"
   context: {}
-  expression: "math.pow(array.first(type.castToIntArray([\"2\", \"3\"])), array.last(type.castToIntArray([\"2\", \"3\"])))"
+  expression: "math.pow(array.first(type.intArray([\"2\", \"3\"])), array.last(type.intArray([\"2\", \"3\"])))"
   expectedResult: 8
 
-- description: "CastToIntArray on empty array"
+- description: "intArray on empty array"
   context: {}
-  expression: "type.castToIntArray([])"
+  expression: "type.intArray([])"
   expectedResult: []
 
-- description: "CastToFloatArray on empty array"
+- description: "floatArray on empty array"
   context: {}
-  expression: "type.castToFloatArray([])"
+  expression: "type.floatArray([])"
   expectedResult: []
 
-- description: "CastToStringArray on empty array"
+- description: "stringArray on empty array"
   context: {}
-  expression: "type.castToStringArray([])"
+  expression: "type.stringArray([])"
   expectedResult: []
 
-- description: "CastToStringArray with nil element"
+- description: "stringArray with nil element"
   context: {}
-  expression: "type.castToStringArray([null, \"foo\"])"
+  expression: "type.stringArray([null, \"foo\"])"
   expectedResult: ["<nil>", "foo"]
 
-- description: "Math.sum with castToFloatArray on float strings"
+- description: "Math.sum with floatArray on float strings"
   context: {}
-  expression: "math.sum(type.castToFloatArray([\"1.5\", \"2.5\", \"3.0\"]))"
+  expression: "math.sum(type.floatArray([\"1.5\", \"2.5\", \"3.0\"]))"
   expectedResult: 7.0
 
-- description: "Math.min with castToFloatArray"
+- description: "Math.min with floatArray"
   context: {}
-  expression: "math.min(type.castToFloatArray([\"3.5\", 2, \"4.0\"]))"
+  expression: "math.min(type.floatArray([\"3.5\", 2, \"4.0\"]))"
   expectedResult: 2.0
 
-- description: "Math.max with castToIntArray"
+- description: "Math.max with intArray"
   context: {}
-  expression: "math.max(type.castToIntArray([\"10\", 5, \"7\"]))"
+  expression: "math.max(type.intArray([\"10\", 5, \"7\"]))"
   expectedResult: 10
 
-- description: "CastToStringArray with nested array element"
+- description: "stringArray with nested array element"
   context: {}
-  expression: "type.castToStringArray([[1,2], 3])"
+  expression: "type.stringArray([[1,2], 3])"
   expectedResult: ["[1 2]", "3"]
 
-- description: "Math.avg with castToStringArray should error (non‑numeric)"
+- description: "Math.avg with stringArray should error (non‑numeric)"
   context: {}
-  expression: "math.avg(type.castToStringArray([\"1\", \"2\", \"3\"]))"
+  expression: "math.avg(type.stringArray([\"1\", \"2\", \"3\"]))"
   expectedError: "TypeError"
   expectedErrorMessage: "element is not numeric"
 
-- description: "Array.first with castToStringArray"
+- description: "Array.first with stringArray"
   context: {}
-  expression: "array.first(type.castToStringArray([1, 2, 3]))"
+  expression: "array.first(type.stringArray([1, 2, 3]))"
   expectedResult: "1"
 
-- description: "Math.ceil with castToFloatArray"
+- description: "Math.ceil with floatArray"
   context: {}
-  expression: "math.ceil(array.first(type.castToFloatArray([\"3.1\", \"4.2\"])))"
+  expression: "math.ceil(array.first(type.floatArray([\"3.1\", \"4.2\"])))"
   expectedResult: 4
