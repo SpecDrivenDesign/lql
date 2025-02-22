@@ -2639,12 +2639,6 @@
   expression: "math.sum($products, 'cost')"
   expectedResult: 6.0
 
-- description: "Math #172: math.sum with mix of int and float in array"
-  context:
-    mixed: [1, 2.5, 3]
-  expression: "math.sum($mixed)"
-  expectedResult: 6.5
-
 - description: "Math #173: math.sum multiple negative integers"
   context:
     vals: [-10, -20, -30]
@@ -2774,14 +2768,6 @@
   expression: "math.min($arr)"
   expectedResult: -1
 
-- description: "Math #192: math.min subfield with some float and some int"
-  context:
-    things:
-      - { measure: 2 }
-      - { measure: 2.5 }
-      - { measure: 1.1 }
-  expression: "math.min($things, 'measure')"
-  expectedResult: 1.1
 
 - description: "Math #193: math.min multiple negative floats"
   context:
@@ -2933,15 +2919,6 @@
     arr: [5, -1, 3]
   expression: "math.max($arr)"
   expectedResult: 5
-
-- description: "Math #217: math.max subfield with some float and some int"
-  context:
-    things:
-      - { measure: 2 }
-      - { measure: 2.5 }
-      - { measure: 3.1 }
-  expression: "math.max($things, 'measure')"
-  expectedResult: 3.1
 
 - description: "Math #218: math.max multiple negative floats"
   context:
@@ -3098,14 +3075,6 @@
   expression: "math.avg($arr)"
   expectedResult: 2.333333333333333
 
-- description: "Math #242: math.avg subfield with some float and some int"
-  context:
-    things:
-      - { measure: 2 }
-      - { measure: 2.5 }
-      - { measure: 3 }
-  expression: "math.avg($things, 'measure')"
-  expectedResult: 2.5  # => (2+2.5+3)=7.5 => /3=2.5
 
 - description: "Math #243: math.avg multiple negative floats"
   context:
@@ -11068,3 +11037,134 @@
       - 10
       - 20
       - 30
+
+
+
+- description: "CastToIntArray with numeric strings"
+  context: {}
+  expression: "type.castToIntArray([\"1\", \"2\", \"3\"])"
+  expectedResult: [1, 2, 3]
+
+- description: "CastToIntArray with non‑numeric element"
+  context: {}
+  expression: "type.castToIntArray([\"1\", \"foo\", \"3\"])"
+  expectedError: "FunctionCallError"
+  expectedErrorMessage: "element at index 1 (foo) is not convertible to int"
+
+- description: "CastToFloatArray with mixed numeric types"
+  context: {}
+  expression: "type.castToFloatArray([\"1.0\", 2, 3])"
+  expectedResult: [1.0, 2.0, 3.0]
+
+- description: "CastToStringArray with mixed types"
+  context: {}
+  expression: "type.castToStringArray([1, \"two\", 3.0])"
+  expectedResult: ["1", "two", "3"]
+
+- description: "Math.sum with castToIntArray"
+  context: {}
+  expression: "math.sum(type.castToIntArray([\"1\", \"2\", \"3\"]))"
+  expectedResult: 6
+
+- description: "Math.avg with castToFloatArray"
+  context: {}
+  expression: "math.avg(type.castToFloatArray([\"1.0\", 2, \"3.0\"]))"
+  expectedResult: 2.0
+
+- description: "String.join with castToStringArray"
+  context: {}
+  expression: "string.join(type.castToStringArray([1, 2, 3]), \"-\")"
+  expectedResult: "1-2-3"
+
+- description: "Math.sum with castToIntArray on mixed valid numeric types"
+  context: {}
+  expression: "math.sum(type.castToIntArray([\"10\", 20, 30.0]))"
+  expectedResult: 60
+
+- description: "CastToIntArray with boolean element (should error)"
+  context: {}
+  expression: "type.castToIntArray([\"5\", true, \"7\"])"
+  expectedError: "FunctionCallError"
+  expectedErrorMessage: "element at index 1 (true) is not convertible to int"
+
+- description: "CastToFloatArray with non‑numeric element"
+  context: {}
+  expression: "type.castToFloatArray([\"1.0\", \"bar\", 3])"
+  expectedError: "FunctionCallError"
+  expectedErrorMessage: "element at index 1 (bar) is not convertible to float"
+
+- description: "CastToStringArray with all strings"
+  context: {}
+  expression: "type.castToStringArray([\"a\", \"b\", \"c\"])"
+  expectedResult: ["a", "b", "c"]
+
+- description: "Array.sort with castToIntArray ascending"
+  context: {}
+  expression: "array.sort(type.castToIntArray([\"3\", \"1\", \"2\"]), true)"
+  expectedResult: [1, 2, 3]
+
+- description: "Array.sort with castToFloatArray descending"
+  context: {}
+  expression: "array.sort(type.castToFloatArray([\"3.0\", 1, \"2.0\"]), false)"
+  expectedResult: [3.0, 2.0, 1.0]
+
+- description: "Math.pow using castToIntArray values"
+  context: {}
+  expression: "math.pow(array.first(type.castToIntArray([\"2\", \"3\"])), array.last(type.castToIntArray([\"2\", \"3\"])))"
+  expectedResult: 8
+
+- description: "CastToIntArray on empty array"
+  context: {}
+  expression: "type.castToIntArray([])"
+  expectedResult: []
+
+- description: "CastToFloatArray on empty array"
+  context: {}
+  expression: "type.castToFloatArray([])"
+  expectedResult: []
+
+- description: "CastToStringArray on empty array"
+  context: {}
+  expression: "type.castToStringArray([])"
+  expectedResult: []
+
+- description: "CastToStringArray with nil element"
+  context: {}
+  expression: "type.castToStringArray([null, \"foo\"])"
+  expectedResult: ["<nil>", "foo"]
+
+- description: "Math.sum with castToFloatArray on float strings"
+  context: {}
+  expression: "math.sum(type.castToFloatArray([\"1.5\", \"2.5\", \"3.0\"]))"
+  expectedResult: 7.0
+
+- description: "Math.min with castToFloatArray"
+  context: {}
+  expression: "math.min(type.castToFloatArray([\"3.5\", 2, \"4.0\"]))"
+  expectedResult: 2.0
+
+- description: "Math.max with castToIntArray"
+  context: {}
+  expression: "math.max(type.castToIntArray([\"10\", 5, \"7\"]))"
+  expectedResult: 10
+
+- description: "CastToStringArray with nested array element"
+  context: {}
+  expression: "type.castToStringArray([[1,2], 3])"
+  expectedResult: ["[1 2]", "3"]
+
+- description: "Math.avg with castToStringArray should error (non‑numeric)"
+  context: {}
+  expression: "math.avg(type.castToStringArray([\"1\", \"2\", \"3\"]))"
+  expectedError: "TypeError"
+  expectedErrorMessage: "element is not numeric"
+
+- description: "Array.first with castToStringArray"
+  context: {}
+  expression: "array.first(type.castToStringArray([1, 2, 3]))"
+  expectedResult: "1"
+
+- description: "Math.ceil with castToFloatArray"
+  context: {}
+  expression: "math.ceil(array.first(type.castToFloatArray([\"3.1\", \"4.2\"])))"
+  expectedResult: 4

@@ -187,6 +187,19 @@ func (a *ArrayLib) Call(functionName string, args []param.Arg, line, col, parenL
 		} else {
 			return nil, errors.NewTypeError("array.sort: elements are not comparable", arg0.Line, arg0.Column)
 		}
+		// Enforce uniform numeric type for numeric arrays.
+		if isNumeric {
+			firstIsInt := types.IsInt(first)
+			for _, e := range arr {
+				if _, ok := types.ToFloat(e); ok {
+					if types.IsInt(e) != firstIsInt {
+						return nil, errors.NewTypeError("array.sort: mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+					}
+				} else {
+					return nil, errors.NewTypeError("array.sort: element is not numeric", arg0.Line, arg0.Column)
+				}
+			}
+		}
 		sorted := make([]interface{}, len(arr))
 		copy(sorted, arr)
 		sort.SliceStable(sorted, func(i, j int) bool {

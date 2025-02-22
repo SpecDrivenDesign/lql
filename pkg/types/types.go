@@ -126,6 +126,12 @@ func ConvertToInterfaceSlice(val interface{}) ([]interface{}, bool) {
 			s[i] = e
 		}
 		return s, true
+	case []string:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
 	}
 	return nil, false
 }
@@ -143,4 +149,89 @@ func ConvertToStringMap(val interface{}) (map[string]interface{}, bool) {
 		return m, true
 	}
 	return nil, false
+}
+
+// ----------------------------------------------------------------
+// New functions for forcefully casting an array to a specific type.
+// These functions allow the caller to explicitly convert a generic array
+// to a slice of a specific type.
+// ----------------------------------------------------------------
+
+// Note: These functions are provided as part of the Type Library in the DSL.
+// They are meant to be invoked via the type namespace (e.g.,
+// type.castToIntArray(...), type.castToFloatArray(...), type.castToStringArray(...)).
+
+// The implementation of these functions is inlined in the DSL's type library,
+// but here we expose their behavior via the functions below.
+
+func CastToIntArray(val interface{}) ([]int64, error) {
+	arr, ok := ConvertToInterfaceSlice(val)
+	if !ok {
+		return nil, fmt.Errorf("castToIntArray: value is not an array")
+	}
+	result := make([]int64, len(arr))
+	for i, elem := range arr {
+		var iVal int64
+		var convOk bool
+		if s, isString := elem.(string); isString {
+			s = strings.TrimSpace(s)
+			parsed, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem)
+			}
+			iVal = parsed
+			convOk = true
+		} else {
+			iVal, convOk = ToInt(elem)
+		}
+		if !convOk {
+			return nil, fmt.Errorf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem)
+		}
+		result[i] = iVal
+	}
+	return result, nil
+}
+
+func CastToFloatArray(val interface{}) ([]float64, error) {
+	arr, ok := ConvertToInterfaceSlice(val)
+	if !ok {
+		return nil, fmt.Errorf("castToFloatArray: value is not an array")
+	}
+	result := make([]float64, len(arr))
+	for i, elem := range arr {
+		var fVal float64
+		var convOk bool
+		if s, isString := elem.(string); isString {
+			s = strings.TrimSpace(s)
+			parsed, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return nil, fmt.Errorf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem)
+			}
+			fVal = parsed
+			convOk = true
+		} else {
+			fVal, convOk = ToFloat(elem)
+		}
+		if !convOk {
+			return nil, fmt.Errorf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem)
+		}
+		result[i] = fVal
+	}
+	return result, nil
+}
+
+func CastToStringArray(val interface{}) ([]string, error) {
+	arr, ok := ConvertToInterfaceSlice(val)
+	if !ok {
+		return nil, fmt.Errorf("castToStringArray: value is not an array")
+	}
+	result := make([]string, len(arr))
+	for i, elem := range arr {
+		str, ok := elem.(string)
+		if !ok {
+			str = fmt.Sprintf("%v", elem)
+		}
+		result[i] = str
+	}
+	return result, nil
 }

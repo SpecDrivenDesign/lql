@@ -132,6 +132,101 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 		}
 		return args[0].Value == nil, nil
 
+	// New conversion functions for arrays (inlined to return []interface{})
+
+	case "castToIntArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.castToIntArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("castToIntArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]int64, len(arr))
+		for i, elem := range arr {
+			var iVal int64
+			var convOk bool
+			if s, isString := elem.(string); isString {
+				s = strings.TrimSpace(s)
+				parsed, err := strconv.ParseInt(s, 10, 64)
+				if err != nil {
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+				}
+				iVal = parsed
+				convOk = true
+			} else {
+				iVal, convOk = types.ToInt(elem)
+			}
+			if !convOk {
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+			}
+			temp[i] = iVal
+		}
+		// Convert []int64 to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, v := range temp {
+			result[i] = v
+		}
+		return result, nil
+
+	case "castToFloatArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.castToFloatArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("castToFloatArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]float64, len(arr))
+		for i, elem := range arr {
+			var fVal float64
+			var convOk bool
+			if s, isString := elem.(string); isString {
+				s = strings.TrimSpace(s)
+				parsed, err := strconv.ParseFloat(s, 64)
+				if err != nil {
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+				}
+				fVal = parsed
+				convOk = true
+			} else {
+				fVal, convOk = types.ToFloat(elem)
+			}
+			if !convOk {
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+			}
+			temp[i] = fVal
+		}
+		// Convert []float64 to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, v := range temp {
+			result[i] = v
+		}
+		return result, nil
+
+	case "castToStringArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.castToStringArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("castToStringArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]string, len(arr))
+		for i, elem := range arr {
+			s, ok := elem.(string)
+			if !ok {
+				s = fmt.Sprintf("%v", elem)
+			}
+			temp[i] = s
+		}
+		// Convert []string to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, s := range temp {
+			result[i] = s
+		}
+		return result, nil
+
 	default:
 		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown type function '%s'", functionName), 0, 0)
 	}
