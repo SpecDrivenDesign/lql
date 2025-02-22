@@ -1,7 +1,3 @@
-Below is an example header markdown document that explains how to integrate and use the LQL module in your Go project. This document covers parsing DSL expressions into an AST, evaluating them against real context variables, and compiling/executing expressions as bytecode using the ByteCodeReader.
-
----
-
 # Logical Query Language (LQL) – Public Interface Usage Guide
 
 **Module Path:**  
@@ -240,13 +236,3 @@ func main() {
     fmt.Printf("Bytecode Evaluation Result: %v\n", result)
 }
 ```
-
----
-
-This header markdown document provides all the details needed to integrate the LQL module:
-- It explains how to parse DSL expressions into an AST.
-- It details how to create an execution environment with standard libraries.
-- It shows how to evaluate expressions against real context variables.
-- It demonstrates compiling DSL expressions into bytecode and executing them using the ByteCodeReader.
-
-Feel free to adjust the wording and examples as needed for your specific integration.
