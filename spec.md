@@ -1,6 +1,6 @@
 # Logical Query Language DSL Specification
 
-This document defines a minimal core grammar and a comprehensive set of namespaced library functions for constructing logical queries over JSON‑like data. The DSL is designed to be concise, strongly typed at runtime, and highly extensible. Every implementation of this DSL **MUST** follow the detailed rules and syntax described herein. No detail is left unspecified, and explicit conversion or error conditions are required for every operation.
+This document defines a minimal core grammar and a comprehensive set of library functions for constructing logical queries over JSON‑like data. The DSL is designed to be concise, strongly typed at runtime, and highly extensible. Every implementation of this DSL **MUST** follow the detailed rules and syntax described herein. No detail is left unspecified, and explicit conversion or error conditions are required for every operation.
 
 ---
 
@@ -202,7 +202,7 @@ Errors in the DSL are classified into four distinct categories:
        - **Trailing commas are not supported.** For example, `{ key: 1, }` is invalid.
    - The literal `null` is the only representation for the null value.
 
-6. **Modular Namespaced Libraries:**  
+6. **Modular Libraries:**  
    - Standard functionality is provided by built‑in libraries (e.g., `time`, `math`, `string`, `regex`, `array`, `cond`, and `type`).  
    - All library functions **MUST** be invoked using their namespace (e.g., `time.now()`, `math.abs(-5)`).  
    - Additional libraries **MUST** be added in a namespaced fashion so as not to interfere with the core DSL.
@@ -283,7 +283,7 @@ Standalone bare identifiers, such as `username` on its own, **MUST** result in a
 The following production rules (written in an extended BNF style) define the DSL’s syntax. Every rule is explicit, and operator precedence and associativity are fully determined by the grammar.
 
 > **Note on Bare Identifiers in the Grammar:**  
-> Standalone bare identifiers (i.e., those not prefixed by `$` or not part of a namespaced function call or object literal key) are disallowed. This rule is enforced in the lexical analysis and reflected in the production rules for context references and function calls.
+> Standalone bare identifiers (i.e., those not prefixed by `$` or not part of a function call or object literal key) are disallowed. This rule is enforced in the lexical analysis and reflected in the production rules for context references and function calls.
 
 #### 5.1 High‑Level Expression
 
@@ -367,7 +367,7 @@ The following production rules (written in an extended BNF style) define the DSL
 ```
 <PrimaryExpression> ::=
       "(" <Expression> ")"
-    | <NamespacedFunctionCall>
+    | <FunctionCall>
     | <ArrayLiteral>
     | <ObjectLiteral>
     | <Literal>
@@ -390,13 +390,17 @@ The following production rules (written in an extended BNF style) define the DSL
 ```
 - *Details:* A standalone `$` represents the root of the context. When accessing a field, the `$` is followed immediately by an identifier (or a quoted string inside brackets).
 
-**Namespaced Function Call:**
+**Function Call:**
 ```
-<NamespacedFunctionCall> ::= <NamespaceParts> "(" [ <ArgumentList> ] ")"
+<FunctionCall> ::= <FunctionName> "(" [ <ArgumentList> ] ")"
 ```
 
 ```
-<NamespaceParts> ::= <Identifier> "." <Identifier>
+<FunctionName> ::= <Library> "." <Method>
+
+<Library> ::= <Identifier>
+
+<Method> ::= <Identifier>
 
 ```
 
@@ -438,7 +442,7 @@ The following production rules (written in an extended BNF style) define the DSL
 
 Each standard library function is defined with its method signature, return type, error conditions, and example usages. Every library function **MUST** be invoked with its namespace.
 
-> **Note:** Additional namespaced libraries may be added without affecting the core DSL.
+> **Note:** Additional libraries may be added without affecting the core DSL.
 
 ### 6.1 Time Library
 
