@@ -996,8 +996,8 @@ The type library provides functions to inspect and convert types. In addition to
      - **Behavior:**  
        Converts any input type to its float representation. If `x` is null, it returns `0.0`. If the input cannot be coerced to a float (e.g. invalid strings), a runtime error is produced.
 
-   - **`type.castToIntArray(value)`**
-     - **Signature:** `type.castToIntArray(any) -> [int64]`
+   - **`type.intArray(value)`**
+     - **Signature:** `type.intArray(any) -> [int64]`
      - **Return Type:** An array of 64‑bit integers.
      - **Potential Errors:**
          - A runtime error **MUST** be raised if the input value is not an array.
@@ -1006,12 +1006,12 @@ The type library provides functions to inspect and convert types. In addition to
        Each element of the input array **MUST** be explicitly converted to an integer using the DSL’s conversion rules (e.g. via `type.int`). This function enables safe processing of arrays that may contain mixed numeric types by ensuring a uniform integer result.
      - **Example:**
        ```sql
-       type.castToIntArray(["1", 2, 3.0])
+       type.intArray(["1", 2, 3.0])
        # => [1, 2, 3]
        ```
 
-   - **`type.castToFloatArray(value)`**
-       - **Signature:** `type.castToFloatArray(any) -> [float64]`
+   - **`type.floatArray(value)`**
+       - **Signature:** `type.floatArray(any) -> [float64]`
        - **Return Type:** An array of 64‑bit floating‑point numbers.
        - **Potential Errors:**
            - A runtime error **MUST** be raised if the input value is not an array.
@@ -1020,12 +1020,12 @@ The type library provides functions to inspect and convert types. In addition to
          Each element of the input array **MUST** be explicitly converted to a float using the DSL’s conversion rules. This function ensures that the resulting array is uniformly of float type.
        - **Example:**
          ```sql
-         type.castToFloatArray(["1.0", 2, 3])
+         type.floatArray(["1.0", 2, 3])
          # => [1.0, 2.0, 3.0]
          ```
 
-   - **`type.castToStringArray(value)`**
-       - **Signature:** `type.castToStringArray(any) -> [string]`
+   - **`type.stringArray(value)`**
+       - **Signature:** `type.stringArray(any) -> [string]`
        - **Return Type:** An array of strings.
        - **Potential Errors:**
            - A runtime error **MUST** be raised if the input value is not an array.
@@ -1033,7 +1033,7 @@ The type library provides functions to inspect and convert types. In addition to
          Each element of the input array **MUST** be converted to its string representation. If an element is not already a string, it **MUST** be converted using the DSL’s conversion method (for example, via `fmt.Sprintf("%v", …)`).
        - **Example:**
          ```sql
-         type.castToStringArray([1, "two", 3.0])
+         type.stringArray([1, "two", 3.0])
          # => ["1", "two", "3"]
          ```
        

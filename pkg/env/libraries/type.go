@@ -86,11 +86,11 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 
 	case "intArray":
 		if len(args) != 1 {
-			return nil, errors.NewParameterError("type.castToIntArray requires 1 argument", line, col)
+			return nil, errors.NewParameterError("type.intArray requires 1 argument", line, col)
 		}
 		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
 		if !ok {
-			return nil, errors.NewFunctionCallError("castToIntArray: value is not an array", args[0].Line, args[0].Column)
+			return nil, errors.NewFunctionCallError("intArray: value is not an array", args[0].Line, args[0].Column)
 		}
 		temp := make([]int64, len(arr))
 		for i, elem := range arr {
@@ -100,7 +100,7 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 				s = strings.TrimSpace(s)
 				parsed, err := strconv.ParseInt(s, 10, 64)
 				if err != nil {
-					return nil, errors.NewFunctionCallError(fmt.Sprintf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("intArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
 				}
 				iVal = parsed
 				convOk = true
@@ -108,7 +108,7 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 				iVal, convOk = types.ToInt(elem)
 			}
 			if !convOk {
-				return nil, errors.NewFunctionCallError(fmt.Sprintf("castToIntArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("intArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
 			}
 			temp[i] = iVal
 		}
@@ -121,11 +121,11 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 
 	case "floatArray":
 		if len(args) != 1 {
-			return nil, errors.NewParameterError("type.castToFloatArray requires 1 argument", line, col)
+			return nil, errors.NewParameterError("type.floatArray requires 1 argument", line, col)
 		}
 		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
 		if !ok {
-			return nil, errors.NewFunctionCallError("castToFloatArray: value is not an array", args[0].Line, args[0].Column)
+			return nil, errors.NewFunctionCallError("floatArray: value is not an array", args[0].Line, args[0].Column)
 		}
 		temp := make([]float64, len(arr))
 		for i, elem := range arr {
@@ -135,7 +135,7 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 				s = strings.TrimSpace(s)
 				parsed, err := strconv.ParseFloat(s, 64)
 				if err != nil {
-					return nil, errors.NewFunctionCallError(fmt.Sprintf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("floatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
 				}
 				fVal = parsed
 				convOk = true
@@ -143,7 +143,7 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 				fVal, convOk = types.ToFloat(elem)
 			}
 			if !convOk {
-				return nil, errors.NewFunctionCallError(fmt.Sprintf("castToFloatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("floatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
 			}
 			temp[i] = fVal
 		}
@@ -156,11 +156,11 @@ func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ in
 
 	case "stringArray":
 		if len(args) != 1 {
-			return nil, errors.NewParameterError("type.castToStringArray requires 1 argument", line, col)
+			return nil, errors.NewParameterError("type.floatArray requires 1 argument", line, col)
 		}
 		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
 		if !ok {
-			return nil, errors.NewFunctionCallError("castToStringArray: value is not an array", args[0].Line, args[0].Column)
+			return nil, errors.NewFunctionCallError("floatArray: value is not an array", args[0].Line, args[0].Column)
 		}
 		temp := make([]string, len(arr))
 		for i, elem := range arr {
