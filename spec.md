@@ -393,18 +393,13 @@ The following production rules (written in an extended BNF style) define the DSL
 **Function Call:**
 ```
 <FunctionCall> ::= <FunctionName> "(" [ <ArgumentList> ] ")"
-```
 
-```
 <FunctionName> ::= <Library> "." <Method>
 
 <Library> ::= <Identifier>
 
 <Method> ::= <Identifier>
 
-```
-
-```
 <ArgumentList> ::= <Expression> { "," <Expression> }
 ```
 - *Examples:*  
