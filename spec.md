@@ -684,13 +684,16 @@ Functions such as `time.getYear(timeVal)`, `time.getMonth(timeVal)`, etc., **MUS
    - **Potential Errors:**  
      - **Runtime Error** if either `x` or `y` is not numeric.
 
-5. **`math.round(x)`**  
-   - **Signature:** `math.round(numeric)`
-   - **Return Type:** numeric  
-   - **Potential Errors:**  
-     - **Runtime Error** if `x` is not numeric.
-   - **Behavior:**  
-     Rounds `x` to the nearest integer. The rounding method (e.g., half‑up, half‑to‑even) **MUST** be documented by the implementation but must be consistent.
+### 5. `math.round(x)`
+- **Signature:** `math.round(numeric)`
+- **Return Type:** numeric
+- **Potential Errors:**
+  - **Runtime Error** if `x` is not numeric.
+- **Behavior:**
+  1. Rounds `x` to the nearest integer.
+  2. If `x` is exactly halfway between two integers (e.g., 2.5 or -3.5), round **away from zero**. 
+     - For a positive halfway value (e.g., 2.5), round up (→ 3).
+     - For a negative halfway value (e.g., -3.5), round down (→ -4).
 
 6. **`math.ceil(x)`**  
    - **Signature:** `math.ceil(numeric)`
