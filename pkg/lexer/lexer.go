@@ -193,7 +193,8 @@ func (l *Lexer) NextToken() (tokens.Token, error) {
 			l.readChar()
 			tok = tokens.Token{Type: tokens.TokenQuestionBracket, Literal: "?[", Line: startLine, Column: startColumn}
 		} else {
-			tok = tokens.Token{Type: tokens.TokenQuestion, Literal: string(l.ch), Line: startLine, Column: startColumn}
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
 		}
 	case '$':
 		tok = tokens.Token{Type: tokens.TokenDollar, Literal: string(l.ch), Line: startLine, Column: startColumn}
