@@ -11168,3 +11168,4 @@
   context: {}
   expression: "math.ceil(array.first(type.floatArray([\"3.1\", \"4.2\"])))"
   expectedResult: 4
+
