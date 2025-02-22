@@ -75,6 +75,9 @@ This document defines a minimal core grammar and a comprehensive set of namespac
      - Time values **MUST** be handled exclusively via the `time` library and are treated as opaque.  
      - **Direct use of relational operators on Time values is forbidden.** If either operand of a relational operator is of Time type, the DSL **MUST** trigger a semantic error instructing the user to use the appropriate time library function (e.g., `time.isBefore` or `time.isAfter`).
 
+6. **Numeric Literal Overflow:**
+   - Every numeric literal MUST be checked to ensure it fits within a 64‑bit integer (for int literals) or a 64‑bit floating‑point number (for float literals). If a numeric literal exceeds the range of the designated 64‑bit type, the DSL engine MUST raise a lexical error with a message such as “Numeric literal overflow” indicating the line and column of the offending literal.
+
 #### 2.1.2 Complex Types
 
 1. **Objects:**  
@@ -210,42 +213,43 @@ Errors in the DSL are classified into four distinct categories:
 
 ### 4.1 Token Types
 
-The DSL tokenizer **MUST** recognize the following token types. Each token type is defined with examples, a description, and the errors that may be triggered if the token is malformed:
+The DSL tokenizer **MUST** recognize the following token types. Each token type is defined with examples, a description, the errors that may be triggered if the token is malformed, and its bytecode representation:
 
-| **Token Type**          | **Examples**                              | **Description**                                                                                                        | **Potential Errors**                                                    |
-|-------------------------|-------------------------------------------|------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| **EOF**                 | *N/A*                                     | End of input marker.                                                                                                   | –                                                                       |
-| **Illegal**             | Unrecognized characters                   | Represents an unrecognized or illegal token (with line/column details).                                                | Triggers a lexical error (e.g., unknown character or malformed literal).|
-| **Ident**               | `userName`, `item_42`, `城市`              | An identifier consisting of letters, digits, or underscores. **MUST NOT** begin with a digit.                          | Lexical error if starting with a digit or containing invalid characters.|
-| **Dollar**              | `$`                                       | Introduces a context reference (e.g., `$user`).                                                                        | –                                                                       |
-| **Number**              | `123`, `-45.67`, `+1e10`, `3.14E-2`         | A numeric literal. If the literal has no decimal point or exponent, it is treated as an int; otherwise, as a float. Leading signs are allowed. | Malformed numeric literal (e.g., `12..3`) triggers a lexical error.      |
-| **String**              | `"hello"`, `'world'`                       | A quoted sequence of characters. Supports escape sequences.                                                            | Unclosed quotes trigger a lexical error.                                |
-| **Bool**                | `true`, `false`                           | Lowercase boolean literal. Tokens that resemble boolean literals with incorrect casing (e.g., `TRUE`) are **NOT** recognized as booleans. Instead, they are treated as bare identifiers, which when used in isolation trigger a syntax error.               | Mis‑cased tokens lead to a syntax error due to bare identifier usage.    |
-| **Null**                | `null`                                    | The null literal.                                                                                                      | Incorrect casing (e.g., `NULL`) triggers a lexical error.               |
-| **And**                 | `AND`, `&&`                               | Logical AND operator.                                                                                                  | –                                                                       |
-| **Or**                  | `OR`, `||`                                | Logical OR operator.                                                                                                   | –                                                                       |
-| **Not**                 | `NOT`, `!`                                | Logical NOT operator.                                                                                                  | –                                                                       |
-| **EQ**                  | `==`                                      | Equality operator.                                                                                                     | –                                                                       |
-| **NEQ**                 | `!=`                                      | Inequality operator.                                                                                                   | –                                                                       |
-| **GT**                  | `>`                                       | Greater than operator.                                                                                                 | Using on non‑comparable types (e.g., booleans) is a semantic error.     |
-| **LT**                  | `<`                                       | Less than operator.                                                                                                    | –                                                                       |
-| **GTE**                 | `>=`                                      | Greater than or equal to operator.                                                                                     | –                                                                       |
-| **LTE**                 | `<=`                                      | Less than or equal to operator.                                                                                        | –                                                                       |
-| **Plus**                | `+`                                       | Addition operator, defined for numeric types only.                                                                     | Applying to non‑numeric types triggers a semantic error.                |
-| **Minus**               | `-`                                       | Binary subtraction operator and unary minus operator. When used in binary context, it performs subtraction. When used as a unary operator (and not immediately attached to a numeric literal), it negates its operand. | Applying unary minus to a non‑numeric operand triggers a semantic error. |
-| **Multiply**            | `*`                                       | Multiplication operator, defined for numeric types only.                                                               | –                                                                       |
-| **Divide**              | `/`                                       | Division operator, defined for numeric types only.                                                                     | Division by zero (when applicable) triggers a runtime error.            |
-| **LParen**              | `(`                                       | Left parenthesis.                                                                                                      | Mismatched parentheses trigger a syntax error.                          |
-| **RParen**              | `)`                                       | Right parenthesis.                                                                                                     | Mismatched parentheses trigger a syntax error.                          |
-| **LBracket**            | `[`                                       | Left square bracket.                                                                                                   | Mismatched brackets trigger a syntax error.                             |
-| **RBracket**            | `]`                                       | Right square bracket.                                                                                                  | Mismatched brackets trigger a syntax error.                             |
-| **Dot**                 | `.`                                       | Dot operator for member access in objects.                                                                             | Misuse triggers a syntax or semantic error.                             |
-| **QuestionDot**         | `?.`                                      | Optional chaining via dot notation.                                                                                    | –                                                                       |
-| **QuestionBracket**     | `?[`                                      | Optional chaining via bracket notation.                                                                                | –                                                                       |
-| **Comma**               | `,`                                       | Separates items in argument lists or array/object literals.                                                            | –                                                                       |
-| **LCurly**              | `{`                                       | Opening brace for object literals.                                                                                     | –                                                                       |
-| **RCurly**              | `}`                                       | Closing brace for object literals.                                                                                     | Mismatched braces trigger a syntax error.                               |
-| **Colon**               | `:`                                       | Separates keys from values in object literals.                                                                         | –                                                                       |
+| **Token Type**          | **Examples**                              | **Description**                                                                                      | **Potential Errors**                                                            | **Encoding (Hex)**  |
+|-------------------------|-------------------------------------------|------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|---------------------|
+| **EOF**                 | *N/A*                                     | End of input marker.                                                                                 | –                                                                               | `0x00`              |
+| **Illegal**             | Unrecognized characters                   | Represents an unrecognized or illegal token.                                                       | Triggers a lexical error.                                                       | `0x01`              |
+| **Ident**               | `userName`, `item_42`, `城市`              | An identifier consisting of letters, digits, or underscores. **MUST NOT** begin with a digit.         | Lexical error if starting with a digit or containing invalid characters.        | `0x02` (followed by 1‑byte length and literal bytes) |
+| **Number**              | `123`, `-45.67`, `+1e10`, `3.14E-2`         | A numeric literal. Integers are those without a decimal point or exponent; others are floats.        | Malformed numeric literals trigger a lexical error.                           | `0x03` (followed by 1‑byte length and literal bytes) |
+| **String**              | `"hello"`, `'world'`                       | A quoted string literal supporting escape sequences.                                               | Unclosed strings trigger a lexical error.                                       | `0x04` (followed by 1‑byte length and literal bytes) |
+| **Bool**                | `true`, `false`                           | Boolean literal (only lowercase allowed).                                                          | Mis‑cased tokens are treated as bare identifiers, triggering a syntax error.      | `0x05` (fixed literal: either “true” or “false”)       |
+| **Null**                | `null`                                    | The null literal.                                                                                    | Incorrect casing triggers a lexical error.                                      | `0x06` (fixed literal “null”)        |
+| **Plus**                | `+`                                       | Addition operator, defined for numeric types only.                                                 | Applying to non‑numeric types triggers a semantic error.                        | `0x07`              |
+| **Minus**               | `-`                                       | Subtraction operator and unary minus.                                                              | Unary minus on non‑numeric triggers a semantic error.                           | `0x08`              |
+| **Multiply**            | `*`                                       | Multiplication operator for numeric types.                                                         | –                                                                               | `0x09`              |
+| **Divide**              | `/`                                       | Division operator for numeric types.                                                               | Division by zero triggers a runtime error.                                      | `0x0A`              |
+| **Lt**                  | `<`                                       | Less‑than operator for numeric and string types.                                                   | Using with unsupported types triggers a semantic error.                        | `0x0B`              |
+| **Gt**                  | `>`                                       | Greater‑than operator for numeric and string types.                                                | –                                                                               | `0x0C`              |
+| **Lte**                 | `<=`                                      | Less‑than-or‑equal operator for numeric and string types.                                          | –                                                                               | `0x0D`              |
+| **Gte**                 | `>=`                                      | Greater‑than-or‑equal operator for numeric and string types.                                       | –                                                                               | `0x0E`              |
+| **Eq**                  | `==`                                      | Equality operator for numeric, string, boolean, or null values.                                     | –                                                                               | `0x0F`              |
+| **Neq**                 | `!=`                                      | Inequality operator for numeric, string, boolean, or null values.                                   | –                                                                               | `0x10`              |
+| **And**                 | `AND`, `&&`                               | Logical AND operator; left‑associative with short‑circuit evaluation.                               | –                                                                               | `0x11`              |
+| **Or**                  | `OR`, `||`                                | Logical OR operator; left‑associative with short‑circuit evaluation.                                | –                                                                               | `0x12`              |
+| **Not**                 | `NOT`, `!`                                | Logical NOT operator.                                                                              | Non‑boolean operand triggers a semantic error.                                  | `0x13`              |
+| **LParen**              | `(`                                       | Left parenthesis.                                                                                  | Mismatched parentheses trigger a syntax error.                                  | `0x14`              |
+| **RParen**              | `)`                                       | Right parenthesis.                                                                                 | –                                                                               | `0x15`              |
+| **LeftBracket**         | `[`                                       | Left square bracket for arrays.                                                                    | Mismatched brackets trigger a syntax error.                                     | `0x16`              |
+| **RightBracket**        | `]`                                       | Right square bracket.                                                                              | –                                                                               | `0x17`              |
+| **LeftCurly**           | `{`                                       | Left curly brace for object literals.                                                              | –                                                                               | `0x18`              |
+| **RightCurly**          | `}`                                       | Right curly brace.                                                                                 | –                                                                               | `0x19`              |
+| **Comma**               | `,`                                       | Comma used to separate elements in arrays or object fields.                                        | –                                                                               | `0x1A`              |
+| **Colon**               | `:`                                       | Colon separating keys and values in object literals.                                               | –                                                                               | `0x1B`              |
+| **Dot**                 | `.`                                       | Dot operator for member access.                                                                    | Misuse triggers a syntax or semantic error.                                     | `0x1C`              |
+| **Question**            | `?`                                       | Question mark (used in optional access contexts).                                                 | –                                                                               | `0x1D`              |
+| **QuestionDot**         | `?.`                                      | Optional chaining via dot notation.                                                                | –                                                                               | `0x1E`              |
+| **QuestionBracket**     | `?[`                                      | Optional chaining via bracket notation.                                                            | –                                                                               | `0x1F`              |
+| **Dollar**              | `$`                                       | Introduces a context reference.                                                                    | –                                                                               | `0x20`              |
 
 **Important Note on Bare Identifiers:**  
 Bare usage of an identifier (e.g., `username`) as a standalone expression **without** a `$` prefix, library namespace, or function call context is **disallowed**. Identifiers **MUST** appear either as:
@@ -393,8 +397,8 @@ The following production rules (written in an extended BNF style) define the DSL
 ```
 
 ```
-<NamespaceParts> ::= <Identifier>
-                   { "." <Identifier> }
+<NamespaceParts> ::= <Identifier> "." <Identifier>
+
 ```
 
 ```
@@ -3529,3 +3533,53 @@ type ObjectField struct {
 ($b == -1) AND NOT $flag && string.concat("Hello", " world")
 ```
 - Changes: added space around `==`, commas; removed extra parentheses spacing; single space after `NOT`.
+
+### 17. Bytecode Serialization Format
+
+Implementations **MUST** provide the ability to compile DSL expressions into a compact binary representation (bytecode). This bytecode format is designed for efficient storage, secure transmission, and rapid execution. The following outlines the structure and encoding rules for the bytecode.
+
+#### 17.1. Overall Structure
+
+A bytecode file consists of four distinct parts concatenated in order:
+
+1. **Header Magic:**  
+   A fixed 4‑byte ASCII sequence (e.g. `"STOK"`) that identifies the file as a LQL bytecode file.
+
+2. **Length Field:**  
+   A 4‑byte little‑endian unsigned integer that specifies the length (in bytes) of the token stream that immediately follows.
+
+3. **Token Stream:**  
+   A sequence of tokens representing the DSL expression. Each token is encoded as described in Section 2 below.
+
+4. **Optional Signature Block:**  
+   If the bytecode is to be signed, an RSA signature is appended after the token stream. This signature is computed over the token stream (excluding the header and length field) using an RSA private key. The signature’s length is fixed by the RSA key size (for example, 256 bytes for a 2048‑bit key).
+
+#### 17.2. Token Encoding
+
+Each token in the token stream is encoded using the following rules:
+
+- **Fixed Token Code:**  
+  Every token is first represented by a single byte that indicates its token type (the exact hex codes are defined in the token table).
+
+- **Literal Data for Variable Tokens:**  
+  Tokens that contain variable text (such as identifiers, numeric literals, and string literals) are followed by:
+    - A **1‑byte length field** (with a maximum value of 255), indicating the number of bytes in the literal.
+    - The literal’s UTF‑8 encoded byte sequence.
+
+- **Fixed Literals:**  
+  Tokens with fixed textual representations (such as punctuation, operators, boolean literals, and `null`) are encoded solely by their token type code; no additional literal data is appended.
+
+#### 17.3. Optional Signature Block
+
+For security and integrity verification, the DSL implementation **MAY** support signing of compiled bytecode:
+
+- **Signature Generation:**  
+  When compiling with a signing option enabled (e.g. via a `-signed` flag), the compiler **MUST** generate an RSA signature using an RSA private key (loaded from a PEM‑formatted file). The signature is computed over the entire token stream (excluding the header and length field).
+
+- **Signature Inclusion:**  
+  The resulting signature is appended immediately after the token stream. The signature’s length is fixed (for example, 256 bytes for a 2048‑bit key).
+
+- **Verification:**  
+  At execution time, if the bytecode is signed, the runtime system **MUST** verify the signature using the corresponding RSA public key (provided via a PEM‑formatted file). A failed verification **MUST** cause the engine to abort execution with an appropriate error.
+
+---
