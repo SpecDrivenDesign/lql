@@ -1,0 +1,5360 @@
+// --------- gocat v1
+// --------- FILE START: "main.go" (size: 14264 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast/expressions"
+	"github.com/SpecDrivenDesign/lql/pkg/bytecode"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/lexer"
+	"github.com/SpecDrivenDesign/lql/pkg/parser"
+	"github.com/SpecDrivenDesign/lql/pkg/signing"
+	"github.com/SpecDrivenDesign/lql/pkg/testing"
+	"gopkg.in/yaml.v3"
+	"io"
+	"log"
+	"os"
+	"strings"
+)
+
+// Color constants
+const (
+	colorReset   = "\033[0m"
+	colorBlue    = "\033[34m"
+	colorMagenta = "\033[35m"
+	colorGreen   = "\033[32m"
+	colorRed     = "\033[31m"
+	colorYellow  = "\033[33m"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Subcommand required: test, compile, exec, repl, validate, or highlight")
+		fmt.Println("Usage:")
+		fmt.Println("  lql test [--test-file=testcases.yml] [--fail-fast] [--verbose] [--output text|yaml]")
+		fmt.Println("  lql compile -expr \"<expression>\" -out <outfile> [-signed -private <private.pem>]")
+		fmt.Println("  lql exec -in <infile> [-signed -public <public.pem>]")
+		fmt.Println("  lql repl -expr \"<expression>\" [-format json|yaml]")
+		fmt.Println("  lql validate -expr \"<expression>\" | -in <file>")
+		fmt.Println("  lql highlight -expr \"<expression>\" [-theme mild|vivid|dracula|solarized]")
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[1]
+	switch subcommand {
+	case "test":
+		runTestCmd()
+	case "compile":
+		runCompileCmd()
+	case "exec":
+		runExecCmd()
+	case "repl":
+		runReplCmd()
+	case "validate":
+		runValidateCmd()
+	case "highlight":
+		runHighlightCmd()
+	default:
+		fmt.Printf("Unknown subcommand: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+func runTestCmd() {
+	testCmd := flag.NewFlagSet("test", flag.ExitOnError)
+	helpPtr := testCmd.Bool("help", false, "Show help message")
+	failFastPtr := testCmd.Bool("fail-fast", false, "Stop on first failure")
+	verbosePtr := testCmd.Bool("verbose", false, "Verbose output")
+	outputFormatPtr := testCmd.String("output", "text", "Output format: text or yaml")
+	testFile := testCmd.String("test-file", "testcases.yml", "YAML file containing test cases")
+	benchmarkPtr := testCmd.Bool("benchmark", false, "Run each expression 1000 times and print benchmark info (only for function calls)")
+	if err := testCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+	if *helpPtr {
+		testCmd.Usage()
+		os.Exit(0)
+	}
+
+	data, err := os.ReadFile(*testFile)
+	if err != nil {
+		log.Fatalf("Error reading file: %s", err)
+	}
+
+	var testCases []testing.TestCase
+	err = yaml.Unmarshal(data, &testCases)
+	if err != nil {
+		log.Fatalf("Error parsing YAML: %s", err)
+	}
+
+	env := env.NewEnvironment()
+	suiteResult := testing.RunTests(testCases, env, *failFastPtr, *benchmarkPtr)
+
+	// Output printing remains here.
+	if strings.ToLower(*outputFormatPtr) == "yaml" {
+		renderYAMLOutput(suiteResult)
+	} else {
+		renderTextOutput(suiteResult, *verbosePtr)
+	}
+
+	if suiteResult.Failed > 0 {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func runCompileCmd() {
+	compileCmd := flag.NewFlagSet("compile", flag.ExitOnError)
+	expr := compileCmd.String("expr", "", "DSL expression to compile")
+	inFile := compileCmd.String("in", "", "File containing a DSL expression to compile")
+	outFile := compileCmd.String("out", "", "Output filename for compiled byteCode")
+	signed := compileCmd.Bool("signed", false, "Whether to sign the compiled byteCode")
+	privateKeyFile := compileCmd.String("private", "private.pem", "Path to RSA private key for signing (required if -signed is true)")
+
+	if err := compileCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+	var expression string
+	if *inFile != "" {
+		data, err := os.ReadFile(*inFile)
+		if err != nil {
+			log.Fatalf("Error reading expression file: %v", err)
+		}
+		expression = strings.TrimSpace(string(data))
+	} else if *expr != "" {
+		expression = *expr
+	} else {
+		fmt.Println("Either -expr or -in flag must be provided.")
+		compileCmd.Usage()
+		os.Exit(1)
+	}
+
+	if *outFile == "" {
+		fmt.Println("The -out flag is required.")
+		compileCmd.Usage()
+		os.Exit(1)
+	}
+
+	lex := lexer.NewLexer(expression)
+	var byteCode []byte
+	var err error
+	if *signed {
+		if *privateKeyFile == "" {
+			fmt.Println("Private key file must be provided when -signed is true.")
+			compileCmd.Usage()
+			os.Exit(1)
+		}
+		privateKey, err := signing.LoadPrivateKey(*privateKeyFile)
+		if err != nil {
+			log.Fatalf("Error loading private key: %v", err)
+		}
+		byteCode, err = lex.ExportTokensSigned(privateKey)
+		if err != nil {
+			log.Fatalf("Error exporting signed tokens: %v", err)
+		}
+	} else {
+		byteCode, err = lex.ExportTokens()
+		if err != nil {
+			log.Fatalf("Error exporting tokens: %v", err)
+		}
+	}
+
+	err = os.WriteFile(*outFile, byteCode, 0600)
+	if err != nil {
+		log.Fatalf("Error writing output file: %v", err)
+	}
+	fmt.Printf("Compilation successful. Bytecode written to %s\n", *outFile)
+}
+
+func runExecCmd() {
+	execCmd := flag.NewFlagSet("exec", flag.ExitOnError)
+	inFile := execCmd.String("in", "", "Input filename of compiled bytecode")
+	expr := execCmd.String("expr", "", "Raw DSL expression to execute")
+	signed := execCmd.Bool("signed", false, "Indicate if the bytecode is signed (only used with -in)")
+	publicKeyFile := execCmd.String("public", "", "Path to RSA public key for signature verification (required if -signed is true)")
+	contextFormat := execCmd.String("format", "yaml", "Format of context input from stdin: json or yaml")
+	if err := execCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+	contextData, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatalf("Error reading context from stdin: %v", err)
+	}
+	var ctx map[string]interface{}
+	if len(strings.TrimSpace(string(contextData))) > 0 {
+		if strings.ToLower(*contextFormat) == "json" {
+			err = json.Unmarshal(contextData, &ctx)
+		} else {
+			err = yaml.Unmarshal(contextData, &ctx)
+		}
+		if err != nil {
+			log.Fatalf("Error parsing context: %v", err)
+		}
+	} else {
+		ctx = make(map[string]interface{})
+	}
+
+	if *expr == "" && *inFile == "" {
+		fmt.Println("Either -expr or -in flag must be provided.")
+		execCmd.Usage()
+		os.Exit(1)
+	}
+
+	if *expr != "" {
+		lex := lexer.NewLexer(*expr)
+		p, err := parser.NewParser(lex)
+		if err != nil {
+			log.Fatalf("Error creating p: %v", err)
+		}
+		ast, err := p.ParseExpression()
+		if err != nil {
+			log.Fatalf("Error parsing expression: %v", err)
+		}
+		env := env.NewEnvironment()
+		result, err := ast.Eval(ctx, env)
+		if err != nil {
+			log.Fatalf("Error executing expression: %v", err)
+		}
+		fmt.Printf("Execution result: %v\n", result)
+		return
+	}
+
+	data, err := os.ReadFile(*inFile)
+	if err != nil {
+		log.Fatalf("Error reading input file: %v", err)
+	}
+
+	var tokenStream parser.TokenStream
+	if *signed {
+		if *publicKeyFile == "" {
+			fmt.Println("Public key file must be provided when -signed is true.")
+			execCmd.Usage()
+			os.Exit(1)
+		}
+		pubKey, err := signing.LoadPublicKey(*publicKeyFile)
+		if err != nil {
+			log.Fatalf("Error loading public key: %v", err)
+		}
+		tokenStream, err = bytecode.NewByteCodeReaderFromSignedData(data, pubKey)
+		if err != nil {
+			log.Fatalf("Error verifying signed bytecode: %v", err)
+		}
+	} else {
+		tokenStream = bytecode.NewByteCodeReader(data)
+	}
+
+	p, err := parser.NewParser(tokenStream)
+	if err != nil {
+		log.Fatalf("Error creating p: %v", err)
+	}
+	ast, err := p.ParseExpression()
+	if err != nil {
+		log.Fatalf("Error parsing expression from bytecode: %v", err)
+	}
+	env := env.NewEnvironment()
+	result, err := ast.Eval(ctx, env)
+	if err != nil {
+		log.Fatalf("Error executing bytecode: %v", err)
+	}
+	fmt.Printf("Execution result: %v\n", result)
+}
+
+func runReplCmd() {
+	replCmd := flag.NewFlagSet("repl", flag.ExitOnError)
+	expr := replCmd.String("expr", "", "DSL expression to evaluate in REPL mode")
+	if err := replCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+	if *expr == "" {
+		fmt.Println("The -expr flag is required in repl mode.")
+		replCmd.Usage()
+		os.Exit(1)
+	}
+
+	lex := lexer.NewLexer(*expr)
+	p, err := parser.NewParser(lex)
+	if err != nil {
+		log.Fatalf("Error creating p: %v", err)
+	}
+	ast, err := p.ParseExpression()
+	if err != nil {
+		log.Fatalf("Error parsing expression: %v", err)
+	}
+	env := env.NewEnvironment()
+
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		log.Fatalf("Error stating stdin: %v", err)
+	}
+
+	if (fi.Mode() & os.ModeCharDevice) == 0 {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var ctx map[string]interface{}
+			if json.Unmarshal([]byte(line), &ctx) != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Error parsing context: %v\n", err)
+				continue
+			}
+			result, err := ast.Eval(ctx, env)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Error executing expression: %v\n", err)
+				continue
+			}
+			fmt.Println(result)
+		}
+		if err := scanner.Err(); err != nil {
+			log.Fatalf("Error reading from stdin: %v", err)
+		}
+	} else {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Print("Enter context (empty line to exit): ")
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Println("\nExiting REPL.")
+				break
+			}
+			input = strings.TrimSpace(input)
+			if input == "" {
+				fmt.Println("Exiting REPL.")
+				break
+			}
+			var ctx map[string]interface{}
+			if json.Unmarshal([]byte(input), &ctx) != nil {
+				fmt.Printf("Error parsing context: %v\n", err)
+				continue
+			}
+			result, err := ast.Eval(ctx, env)
+			if err != nil {
+				fmt.Printf("Error executing expression: %v\n", err)
+				continue
+			}
+			fmt.Printf("%v\n", result)
+		}
+	}
+}
+
+func runValidateCmd() {
+	validateCmd := flag.NewFlagSet("validate", flag.ExitOnError)
+	expr := validateCmd.String("expr", "", "DSL expression to validate")
+	inFile := validateCmd.String("in", "", "File containing a DSL expression to validate")
+	if err := validateCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+
+	var expression string
+	if *inFile != "" {
+		data, err := os.ReadFile(*inFile)
+		if err != nil {
+			fmt.Printf("Error reading expression file: %v\n", err)
+			os.Exit(1)
+		}
+		expression = strings.TrimSpace(string(data))
+	} else if *expr != "" {
+		expression = *expr
+	} else {
+		fmt.Println("Either -expr or -in flag must be provided.")
+		validateCmd.Usage()
+		os.Exit(1)
+	}
+
+	lex := lexer.NewLexer(expression)
+	p, err := parser.NewParser(lex)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+	}
+
+	_, err = p.ParseExpression()
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func renderTextOutput(suite testing.TestSuiteResult, verbose bool) {
+	for _, res := range suite.TestResults {
+		if !verbose && res.Status == "PASSED" && res.BenchmarkTime == "" {
+			continue
+		}
+		if res.Status == "SKIPPED" {
+			continue
+		}
+		fmt.Printf("%s[Test #%d] %s%s\n", colorBlue, res.TestID, res.Description, colorReset)
+		fmt.Printf("    Expression : %s\n", res.Expression)
+		fmt.Printf("    Context    : %v\n", res.Context)
+		if res.ExpectedError != "" || res.ActualError != nil {
+			if res.ExpectedResult != nil {
+				fmt.Printf("    Expected   : %v\n", res.ExpectedResult)
+				fmt.Printf("    Actual     : %v\n", res.ActualResult)
+			}
+			if res.ExpectedError != "" {
+				fmt.Printf("    Expected Error Message: %s: %s\n", res.ExpectedError, res.ExpectedErrorMessage)
+			}
+			fmt.Printf("    Actual Error Message  : %v\n", res.ActualError)
+		} else {
+			fmt.Printf("    Expected   : %v\n", res.ExpectedResult)
+			fmt.Printf("    Actual     : %v\n", res.ActualResult)
+		}
+		if res.BenchmarkTime != "" {
+			fmt.Printf("    Benchmark  : %s (%0.2f ops/sec)\n", res.BenchmarkTime, res.BenchmarkOpsSec)
+		}
+		if res.ActualError != nil && res.Status != "PASSED" {
+			if res.ErrLine > 0 && res.ErrColumn > 0 {
+				fmt.Println(errors.GetErrorContext(res.Expression, res.ErrLine, res.ErrColumn, true))
+			}
+		}
+		statusColor := ""
+		switch res.Status {
+		case "PASSED":
+			statusColor = colorGreen
+		case "FAILED":
+			statusColor = colorRed
+		case "SKIPPED":
+			statusColor = colorYellow
+		}
+		fmt.Printf("    Status     : %s%s%s\n\n", statusColor, res.Status, colorReset)
+	}
+	fmt.Println("==============================================")
+	fmt.Println("Test Suite Completed")
+	fmt.Printf("  %sPASSED  %s: %d\n  %sSKIPPED %s: %d\n  %sFAILED  %s: %d\n  TOTAL   : %d\n",
+		colorGreen, colorReset, suite.Passed,
+		colorYellow, colorReset, suite.Skipped,
+		colorRed, colorReset, suite.Failed,
+		suite.Total)
+	fmt.Println("==============================================")
+}
+
+func renderYAMLOutput(suite testing.TestSuiteResult) {
+	out, err := yaml.Marshal(suite)
+	if err != nil {
+		log.Fatalf("Error marshaling YAML: %s", err)
+	}
+	fmt.Println(string(out))
+}
+
+func runHighlightCmd() {
+	highlightCmd := flag.NewFlagSet("highlight", flag.ExitOnError)
+	exprPtr := highlightCmd.String("expr", "", "Expression to highlight")
+	themePtr := highlightCmd.String("theme", "mild", "Color theme: mild|vivid|dracula|solarized")
+
+	if err := highlightCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *exprPtr == "" {
+		fmt.Println("The -expr flag is required.")
+		highlightCmd.Usage()
+		os.Exit(1)
+	}
+
+	expressions.ColorEnabled = true
+
+	// 1) Parse the user expression into an AST.
+	lex := lexer.NewLexer(*exprPtr)
+	p, err := parser.NewParser(lex)
+	if err != nil {
+		log.Fatalf("Error creating parser: %v", err)
+	}
+	ast, err := p.ParseExpression()
+	if err != nil {
+		log.Fatalf("Error parsing expression: %v", err)
+	}
+
+	// 3) Apply the chosen color theme.
+	switch strings.ToLower(*themePtr) {
+	case "mild":
+		expressions.ApplyMildPalette()
+	case "vivid":
+		expressions.ApplyVividPalette()
+	case "dracula":
+		expressions.ApplyDraculaPalette()
+	case "solarized":
+		expressions.ApplySolarizedPalette()
+	default:
+		fmt.Printf("Unknown theme '%s'. Using mild.\n", *themePtr)
+		expressions.ApplyMildPalette()
+	}
+
+	// 2) Get the canonical string from the AST.
+	highlighted := ast.String()
+	// 5) Print out the final colorized output
+	fmt.Println(highlighted)
+}
+// --------- FILE END: "main.go" ----------
+// --------- FILE START: "pkg/ast/expressions/arrayliteral.go" (size: 1298 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"strings"
+)
+
+// ArrayLiteralExpr represents an array literal.
+type ArrayLiteralExpr struct {
+	Elements []ast.Expression
+	Line     int
+	Column   int
+}
+
+func (a *ArrayLiteralExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	var result []interface{}
+	for _, expr := range a.Elements {
+		val, err := expr.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, val)
+	}
+	return result, nil
+}
+
+func (a *ArrayLiteralExpr) Pos() (int, int) {
+	return a.Line, a.Column
+}
+
+func (a *ArrayLiteralExpr) String() string {
+	var sb strings.Builder
+
+	// Default punctuation strings (uncolored).
+	openBracket := "["
+	closeBracket := "]"
+	comma := ", "
+
+	// If color is enabled, override with colored brackets/commas.
+	if ColorEnabled {
+		openBracket = fmt.Sprintf("%s[%s", PunctuationColor, ColorReset)
+		closeBracket = fmt.Sprintf("%s]%s", PunctuationColor, ColorReset)
+		comma = fmt.Sprintf("%s,%s ", PunctuationColor, ColorReset)
+	}
+
+	sb.WriteString(openBracket)
+
+	for i, elem := range a.Elements {
+		if i > 0 {
+			sb.WriteString(comma)
+		}
+		sb.WriteString(elem.String())
+	}
+
+	sb.WriteString(closeBracket)
+	return sb.String()
+}
+// --------- FILE END: "pkg/ast/expressions/arrayliteral.go" ----------
+// --------- FILE START: "pkg/ast/ast.go" (size: 280 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package ast
+
+import (
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+)
+
+// Expression interface represents an AST node that can be evaluated.
+type Expression interface {
+	Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error)
+	Pos() (int, int)
+	String() string
+}
+// --------- FILE END: "pkg/ast/ast.go" ----------
+// --------- FILE START: "pkg/env/env.go" (size: 881 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package env
+
+import (
+	libraries2 "github.com/SpecDrivenDesign/lql/pkg/env/libraries"
+)
+
+// Environment holds the available libraries.
+type Environment struct {
+	Libraries map[string]ILibrary
+}
+
+// NewEnvironment creates a new Environment with default libraries.
+func NewEnvironment() *Environment {
+	env := &Environment{Libraries: make(map[string]ILibrary)}
+	env.Libraries["time"] = libraries2.NewTimeLib()
+	env.Libraries["math"] = libraries2.NewMathLib()
+	env.Libraries["string"] = libraries2.NewStringLib()
+	env.Libraries["regex"] = libraries2.NewRegexLib()
+	env.Libraries["array"] = libraries2.NewArrayLib()
+	env.Libraries["cond"] = libraries2.NewCondLib()
+	env.Libraries["type"] = libraries2.NewTypeLib()
+	return env
+}
+
+// GetLibrary retrieves a library by name.
+func (e *Environment) GetLibrary(name string) (ILibrary, bool) {
+	lib, ok := e.Libraries[name]
+	return lib, ok
+}
+// --------- FILE END: "pkg/env/env.go" ----------
+// --------- FILE START: "pkg/env/libraries/array.go" (size: 8731 bytes, modtime: 2025-02-21T20:49:40-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"sort"
+)
+
+// ArrayLib implements the array library functions.
+type ArrayLib struct{}
+
+func NewArrayLib() *ArrayLib {
+	return &ArrayLib{}
+}
+
+func (a *ArrayLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "contains":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("array.contains requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.contains: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		target := args[1].Value
+		for _, item := range arr {
+			if types.Equals(item, target) {
+				return true, nil
+			}
+		}
+		return false, nil
+
+	case "find":
+		if len(args) < 3 || len(args) > 4 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("array.find requires 3 or 4 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("array.find requires 3 or 4 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.find: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		subfield, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("array.find: second argument must be string", arg1.Line, arg1.Column)
+		}
+		matchVal := args[2].Value
+		var defaultObj interface{}
+		if len(args) == 4 {
+			defaultObj = args[3].Value
+		}
+		for _, elem := range arr {
+			obj, ok := types.ConvertToStringMap(elem)
+			if !ok {
+				continue
+			}
+			if v, exists := obj[subfield]; exists {
+				if types.Equals(v, matchVal) {
+					return obj, nil
+				}
+			}
+		}
+		if defaultObj != nil {
+			return defaultObj, nil
+		}
+		return nil, errors.NewFunctionCallError("array.find: no match found", arg0.Line, arg0.Column)
+
+	case "first":
+		if len(args) < 1 || len(args) > 2 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("array.first requires 1 or 2 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("array.first requires 1 or 2 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.first: argument must be an array", arg0.Line, arg0.Column)
+		}
+		if len(arr) == 0 {
+			if len(args) == 2 {
+				return args[1].Value, nil
+			}
+			return nil, errors.NewFunctionCallError("array.first: array is empty", arg0.Line, arg0.Column)
+		}
+		return arr[0], nil
+
+	case "last":
+		if len(args) < 1 || len(args) > 2 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("array.last requires 1 or 2 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("array.last requires 1 or 2 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.last: argument must be an array", arg0.Line, arg0.Column)
+		}
+		if len(arr) == 0 {
+			if len(args) == 2 {
+				return args[1].Value, nil
+			}
+			return nil, errors.NewFunctionCallError("array.last: array is empty", arg0.Line, arg0.Column)
+		}
+		return arr[len(arr)-1], nil
+
+	case "extract":
+		if len(args) < 2 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("array.extract requires 2 or 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("array.extract requires 2 or 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.extract: argument must be an array", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		subfield, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("array.extract: second argument must be string", arg1.Line, arg1.Column)
+		}
+		var defaultVal interface{}
+		if len(args) == 3 {
+			defaultVal = args[2].Value
+		}
+		var result []interface{}
+		for _, elem := range arr {
+			obj, ok := types.ConvertToStringMap(elem)
+			if !ok {
+				result = append(result, defaultVal)
+			} else {
+				if v, exists := obj[subfield]; exists {
+					result = append(result, v)
+				} else {
+					result = append(result, defaultVal)
+				}
+			}
+		}
+		return result, nil
+
+	case "sort":
+		if len(args) < 1 || len(args) > 2 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("array.sort requires 1 or 2 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("array.sort requires 1 or 2 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.sort: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		ascending := true
+		if len(args) == 2 {
+			arg1 := args[1]
+			asc, ok := arg1.Value.(bool)
+			if !ok {
+				return nil, errors.NewTypeError("array.sort: second argument must be boolean", arg1.Line, arg1.Column)
+			}
+			ascending = asc
+		}
+		if len(arr) == 0 {
+			return arr, nil
+		}
+		first := arr[0]
+		isNumeric := false
+		isString := false
+		if _, ok := types.ToFloat(first); ok {
+			isNumeric = true
+		} else if _, ok := first.(string); ok {
+			isString = true
+		} else {
+			return nil, errors.NewTypeError("array.sort: elements are not comparable", arg0.Line, arg0.Column)
+		}
+		// Enforce uniform numeric type for numeric arrays.
+		if isNumeric {
+			firstIsInt := types.IsInt(first)
+			for _, e := range arr {
+				if _, ok := types.ToFloat(e); ok {
+					if types.IsInt(e) != firstIsInt {
+						return nil, errors.NewTypeError("array.sort: mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+					}
+				} else {
+					return nil, errors.NewTypeError("array.sort: element is not numeric", arg0.Line, arg0.Column)
+				}
+			}
+		}
+		sorted := make([]interface{}, len(arr))
+		copy(sorted, arr)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			a := sorted[i]
+			b := sorted[j]
+			if isNumeric {
+				af, _ := types.ToFloat(a)
+				bf, _ := types.ToFloat(b)
+				if ascending {
+					return af < bf
+				}
+				return af > bf
+			}
+			if isString {
+				as := a.(string)
+				bs := b.(string)
+				if ascending {
+					return as < bs
+				}
+				return as > bs
+			}
+			return false
+		})
+		return sorted, nil
+
+	case "flatten":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("array.flatten requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.flatten: argument must be an array", arg0.Line, arg0.Column)
+		}
+		var result []interface{}
+		for _, elem := range arr {
+			if subArr, ok := types.ConvertToInterfaceSlice(elem); ok {
+				result = append(result, subArr...)
+			} else {
+				result = append(result, elem)
+			}
+		}
+		return result, nil
+
+	case "filter":
+		if len(args) < 1 || len(args) > 3 {
+			return nil, errors.NewParameterError("array.filter requires between 1 and 3 arguments", line, col)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("array.filter: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		if len(args) == 1 {
+			var filtered []interface{}
+			for _, elem := range arr {
+				if elem != nil {
+					filtered = append(filtered, elem)
+				}
+			}
+			return filtered, nil
+		}
+		arg1 := args[1]
+		subfield, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("array.filter: subfield argument must be string", arg1.Line, arg1.Column)
+		}
+		if len(args) == 2 {
+			var filtered []interface{}
+			for _, elem := range arr {
+				obj, ok := types.ConvertToStringMap(elem)
+				if !ok {
+					continue
+				}
+				val, exists := obj[subfield]
+				if exists && val != nil {
+					filtered = append(filtered, elem)
+				}
+			}
+			return filtered, nil
+		}
+		matchVal := args[2].Value
+		var filtered []interface{}
+		for _, elem := range arr {
+			obj, ok := types.ConvertToStringMap(elem)
+			if !ok {
+				continue
+			}
+			val, exists := obj[subfield]
+			if exists && types.Equals(val, matchVal) {
+				filtered = append(filtered, elem)
+			}
+		}
+		return filtered, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown array function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/array.go" ----------
+// --------- FILE START: "pkg/errors/errors.go" (size: 7953 bytes, modtime: 2025-02-18T22:40:48-05:00) ----------
+package errors
+
+import (
+	"fmt"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+
+	stdErrors "errors"
+)
+
+// PositionalError interface for errors that include positional information.
+type PositionalError interface {
+	error
+	GetLine() int
+	GetColumn() int
+	Kind() string
+}
+
+// TypeError
+type TypeError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *TypeError) Error() string {
+	return fmt.Sprintf("TypeError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *TypeError) GetLine() int   { return e.Line }
+func (e *TypeError) GetColumn() int { return e.Column }
+func (e *TypeError) Kind() string   { return "TypeError" }
+
+func NewTypeError(msg string, line, column int) error {
+	return &TypeError{Msg: msg, Line: line, Column: column}
+}
+
+// DivideByZeroError
+type DivideByZeroError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *DivideByZeroError) Error() string {
+	return fmt.Sprintf("DivideByZeroError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *DivideByZeroError) GetLine() int   { return e.Line }
+func (e *DivideByZeroError) GetColumn() int { return e.Column }
+func (e *DivideByZeroError) Kind() string   { return "DivideByZeroError" }
+
+func NewDivideByZeroError(msg string, line, column int) error {
+	return &DivideByZeroError{Msg: msg, Line: line, Column: column}
+}
+
+// ReferenceError
+type ReferenceError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *ReferenceError) Error() string {
+	return fmt.Sprintf("ReferenceError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *ReferenceError) GetLine() int   { return e.Line }
+func (e *ReferenceError) GetColumn() int { return e.Column }
+func (e *ReferenceError) Kind() string   { return "ReferenceError" }
+
+func NewReferenceError(msg string, line, column int) error {
+	return &ReferenceError{Msg: msg, Line: line, Column: column}
+}
+
+// UnknownIdentifierError
+type UnknownIdentifierError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *UnknownIdentifierError) Error() string {
+	return fmt.Sprintf("UnknownIdentifierError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *UnknownIdentifierError) GetLine() int   { return e.Line }
+func (e *UnknownIdentifierError) GetColumn() int { return e.Column }
+func (e *UnknownIdentifierError) Kind() string   { return "UnknownIdentifierError" }
+
+func NewUnknownIdentifierError(msg string, line, column int) error {
+	return &UnknownIdentifierError{Msg: msg, Line: line, Column: column}
+}
+
+// UnknownOperatorError
+type UnknownOperatorError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *UnknownOperatorError) Error() string {
+	return fmt.Sprintf("UnknownOperatorError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *UnknownOperatorError) GetLine() int   { return e.Line }
+func (e *UnknownOperatorError) GetColumn() int { return e.Column }
+func (e *UnknownOperatorError) Kind() string   { return "UnknownOperatorError" }
+
+func NewUnknownOperatorError(msg string, line, column int) error {
+	return &UnknownOperatorError{Msg: msg, Line: line, Column: column}
+}
+
+// FunctionCallError
+type FunctionCallError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *FunctionCallError) Error() string {
+	return fmt.Sprintf("FunctionCallError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *FunctionCallError) GetLine() int   { return e.Line }
+func (e *FunctionCallError) GetColumn() int { return e.Column }
+func (e *FunctionCallError) Kind() string   { return "FunctionCallError" }
+
+func NewFunctionCallError(msg string, line, column int) error {
+	return &FunctionCallError{Msg: msg, Line: line, Column: column}
+}
+
+// ParameterError
+type ParameterError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *ParameterError) Error() string {
+	return fmt.Sprintf("ParameterError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *ParameterError) GetLine() int   { return e.Line }
+func (e *ParameterError) GetColumn() int { return e.Column }
+func (e *ParameterError) Kind() string   { return "ParameterError" }
+
+func NewParameterError(msg string, line, column int) error {
+	return &ParameterError{Msg: msg, Line: line, Column: column}
+}
+
+// LexicalError
+type LexicalError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *LexicalError) Error() string {
+	return fmt.Sprintf("LexicalError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *LexicalError) GetLine() int   { return e.Line }
+func (e *LexicalError) GetColumn() int { return e.Column }
+func (e *LexicalError) Kind() string   { return "LexicalError" }
+
+func NewLexicalError(msg string, line, column int) error {
+	return &LexicalError{Msg: msg, Line: line, Column: column}
+}
+
+// SyntaxError
+type SyntaxError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *SyntaxError) Error() string {
+	return fmt.Sprintf("SyntaxError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *SyntaxError) GetLine() int   { return e.Line }
+func (e *SyntaxError) GetColumn() int { return e.Column }
+func (e *SyntaxError) Kind() string   { return "SyntaxError" }
+
+func NewSyntaxError(msg string, line, column int) error {
+	return &SyntaxError{Msg: msg, Line: line, Column: column}
+}
+
+// SemanticError
+type SemanticError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *SemanticError) Error() string {
+	return fmt.Sprintf("SemanticError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *SemanticError) GetLine() int   { return e.Line }
+func (e *SemanticError) GetColumn() int { return e.Column }
+func (e *SemanticError) Kind() string   { return "SemanticError" }
+
+func NewSemanticError(msg string, line, column int) error {
+	return &SemanticError{Msg: msg, Line: line, Column: column}
+}
+
+// ArrayOutOfBoundsError
+type ArrayOutOfBoundsError struct {
+	Msg    string
+	Line   int
+	Column int
+}
+
+func (e *ArrayOutOfBoundsError) Error() string {
+	return fmt.Sprintf("ArrayOutOfBoundsError: %s at line %d, column %d", e.Msg, e.Line, e.Column)
+}
+
+func (e *ArrayOutOfBoundsError) GetLine() int   { return e.Line }
+func (e *ArrayOutOfBoundsError) GetColumn() int { return e.Column }
+func (e *ArrayOutOfBoundsError) Kind() string   { return "ArrayOutOfBoundsError" }
+
+func NewArrayOutOfBoundsError(msg string, line, column int) error {
+	return &ArrayOutOfBoundsError{Msg: msg, Line: line, Column: column}
+}
+
+// GetErrorContext returns a formatted error context string showing the line and a pointer to the error column.
+func GetErrorContext(expr string, errLine, errColumn int, colored bool) string {
+	lines := strings.Split(expr, "\n")
+	if errLine-1 < 0 || errLine-1 >= len(lines) {
+		return ""
+	}
+	lineText := lines[errLine-1]
+	if errColumn > len(lineText) {
+		errColumn = len(lineText)
+	}
+	pointer := ""
+	for i := 0; i < errColumn-1 && i < len(lineText); i++ {
+		if lineText[i] == '\t' {
+			pointer += "\t"
+		} else {
+			pointer += "-"
+		}
+	}
+	pointer += "^"
+	if colored {
+		pointer = "\033[31m" + pointer + "\033[0m"
+	}
+	return fmt.Sprintf("    %s\n    %s", lineText, pointer)
+}
+
+// GetErrorPosition attempts to extract the line and column from an error.
+func GetErrorPosition(err error) (int, int) {
+	type positioner interface {
+		Position() (int, int)
+	}
+	if pe, ok := err.(positioner); ok {
+		return pe.Position()
+	}
+	var ep PositionalError
+	if stdErrors.As(err, &ep) {
+		return ep.GetLine(), ep.GetColumn()
+	}
+	v := reflect.ValueOf(err)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	fieldLine := v.FieldByName("Line")
+	fieldColumn := v.FieldByName("Column")
+	if fieldLine.IsValid() && fieldColumn.IsValid() && fieldLine.CanInt() && fieldColumn.CanInt() {
+		return int(fieldLine.Int()), int(fieldColumn.Int())
+	}
+	r := regexp.MustCompile(`at line (\d+), column (\d+)`)
+	matches := r.FindStringSubmatch(err.Error())
+	if len(matches) == 3 {
+		line, err1 := strconv.Atoi(matches[1])
+		col, err2 := strconv.Atoi(matches[2])
+		if err1 == nil && err2 == nil {
+			return line, col
+		}
+	}
+	return 0, 0
+}
+// --------- FILE END: "pkg/errors/errors.go" ----------
+// --------- FILE START: "pkg/param/param.go" (size: 139 bytes, modtime: 2025-02-18T22:40:48-05:00) ----------
+package param
+
+// Arg represents an argument passed to a library function.
+type Arg struct {
+	Value  interface{}
+	Line   int
+	Column int
+}
+// --------- FILE END: "pkg/param/param.go" ----------
+// --------- FILE START: "pkg/types/types.go" (size: 3144 bytes, modtime: 2025-02-21T21:41:49-05:00) ----------
+package types
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"math"
+	"strconv"
+	"strings"
+)
+
+// ToFloat converts a numeric value to a float64.
+func ToFloat(val interface{}) (float64, bool) {
+	switch v := val.(type) {
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	}
+	return 0, false
+}
+
+// ToInt converts a numeric value to an int64.
+func ToInt(val interface{}) (int64, bool) {
+	switch v := val.(type) {
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case float64:
+		return int64(v), true
+	}
+	return 0, false
+}
+
+// IsInt checks if a value is of an integer type.
+func IsInt(val interface{}) bool {
+	switch val.(type) {
+	case int, int64:
+		return true
+	}
+	return false
+}
+
+// Equals compares two values for equality.
+func Equals(left, right interface{}) bool {
+	lf, lok := ToFloat(left)
+	rf, rok := ToFloat(right)
+	if lok && rok {
+		return math.Abs(lf-rf) < 1e-9
+	}
+	return fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right)
+}
+
+// Compare compares two values using the given operator.
+func Compare(left, right interface{}, op string, line, column int) (bool, error) {
+	lf, lok := ToFloat(left)
+	rf, rok := ToFloat(right)
+	if lok && rok {
+		switch op {
+		case "<":
+			return lf < rf, nil
+		case ">":
+			return lf > rf, nil
+		case "<=":
+			return lf <= rf, nil
+		case ">=":
+			return lf >= rf, nil
+		}
+	}
+	ls, lok := left.(string)
+	rs, rok := right.(string)
+	if lok && rok {
+		switch op {
+		case "<":
+			return ls < rs, nil
+		case ">":
+			return ls > rs, nil
+		case "<=":
+			return ls <= rs, nil
+		case ">=":
+			return ls >= rs, nil
+		}
+	}
+	return false, errors.NewSemanticError(fmt.Sprintf("'%s' operator not allowed on given types", op), line, column)
+}
+
+// ParseNumber parses a numeric literal string.
+func ParseNumber(lit string) interface{} {
+	if strings.ContainsAny(lit, ".eE") {
+		f, err := strconv.ParseFloat(lit, 64)
+		if err != nil {
+			return 0.0
+		}
+		return f
+	} else {
+		i, err := strconv.ParseInt(lit, 10, 64)
+		if err != nil {
+			return int64(0)
+		}
+		return i
+	}
+}
+
+// ConvertToInterfaceSlice converts various slice types to []interface{}.
+func ConvertToInterfaceSlice(val interface{}) ([]interface{}, bool) {
+	switch v := val.(type) {
+	case []interface{}:
+		return v, true
+	case []int:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
+	case []int64:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
+	case []float64:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
+	case []string:
+		s := make([]interface{}, len(v))
+		for i, e := range v {
+			s[i] = e
+		}
+		return s, true
+	}
+	return nil, false
+}
+
+// ConvertToStringMap converts various map types to map[string]interface{}.
+func ConvertToStringMap(val interface{}) (map[string]interface{}, bool) {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v, true
+	case map[interface{}]interface{}:
+		m := make(map[string]interface{})
+		for key, value := range v {
+			m[fmt.Sprintf("%v", key)] = value
+		}
+		return m, true
+	}
+	return nil, false
+}
+// --------- FILE END: "pkg/types/types.go" ----------
+// --------- FILE START: "pkg/env/libraries/cond.go" (size: 1947 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// CondLib implements conditional library functions.
+type CondLib struct{}
+
+func NewCondLib() *CondLib {
+	return &CondLib{}
+}
+
+func (c *CondLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "ifExpr":
+		if len(args) != 3 {
+			return nil, errors.NewParameterError("cond.ifExpr requires 3 arguments", line, col)
+		}
+		arg0 := args[0]
+		condVal, ok := arg0.Value.(bool)
+		if !ok {
+			if arg0.Value == nil {
+				condVal = false
+			} else {
+				return nil, errors.NewTypeError("cond.ifExpr: first argument must be boolean", arg0.Line, arg0.Column)
+			}
+		}
+		if condVal {
+			return args[1].Value, nil
+		}
+		return args[2].Value, nil
+
+	case "coalesce":
+		if len(args) < 1 {
+			return nil, errors.NewParameterError("cond.coalesce requires at least 1 argument", parenLine, parenCol)
+		}
+		for _, arg := range args {
+			if arg.Value != nil {
+				return arg.Value, nil
+			}
+		}
+		return nil, errors.NewFunctionCallError("cond.coalesce: all arguments are null", args[0].Line, args[0].Column)
+
+	case "isFieldPresent":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("cond.isFieldPresent requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		obj, ok := types.ConvertToStringMap(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("cond.isFieldPresent: first argument must be an object", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		fieldPath, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("cond.isFieldPresent: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		_, exists := obj[fieldPath]
+		return exists, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown cond function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/cond.go" ----------
+// --------- FILE START: "pkg/env/libraries/math.go" (size: 12287 bytes, modtime: 2025-02-21T20:49:56-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"math"
+)
+
+// MathLib implements math library functions.
+type MathLib struct{}
+
+func NewMathLib() *MathLib {
+	return &MathLib{}
+}
+
+func (m *MathLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "abs":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("math.abs requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		num, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.abs: argument must be numeric", arg0.Line, arg0.Column)
+		}
+		if num < 0 {
+			if types.IsInt(arg0.Value) {
+				return int64(-num), nil
+			}
+			return -num, nil
+		}
+		if types.IsInt(arg0.Value) {
+			return int64(num), nil
+		}
+		return num, nil
+
+	case "sqrt":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("math.sqrt requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		num, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.sqrt: argument must be numeric", arg0.Line, arg0.Column)
+		}
+		if num < 0 {
+			return nil, errors.NewFunctionCallError("math.sqrt: argument must be non‑negative", arg0.Line, arg0.Column)
+		}
+		return math.Sqrt(num), nil
+
+	case "floor":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("math.floor requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		num, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.floor: argument must be numeric", arg0.Line, arg0.Column)
+		}
+		return math.Floor(num), nil
+
+	case "round":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("math.round requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		num, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.round: argument must be numeric", arg0.Line, arg0.Column)
+		}
+		return math.Round(num), nil
+
+	case "ceil":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("math.ceil requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		num, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.ceil: argument must be numeric", arg0.Line, arg0.Column)
+		}
+		return math.Ceil(num), nil
+
+	case "pow":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("math.pow requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		base, ok := types.ToFloat(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.pow: first argument must be numeric", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		exp, ok := types.ToFloat(arg1.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.pow: second argument must be numeric", arg1.Line, arg1.Column)
+		}
+		return math.Pow(base, exp), nil
+
+	case "sum":
+		if len(args) < 1 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("math.sum requires 1 to 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("math.sum requires 1 to 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.sum: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		var subfield string
+		var defaultVal interface{}
+		if len(args) >= 2 {
+			arg1 := args[1]
+			sf, ok := arg1.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("math.sum: second argument must be string", arg1.Line, arg1.Column)
+			}
+			subfield = sf
+		}
+		if len(args) == 3 {
+			defaultVal = args[2].Value
+		}
+		sum := 0.0
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
+		for _, elem := range arr {
+			var num interface{}
+			if subfield != "" {
+				obj, ok := types.ConvertToStringMap(elem)
+				if !ok {
+					if defaultVal != nil {
+						num = defaultVal
+					} else {
+						return nil, errors.NewFunctionCallError("math.sum: element is not an object and subfield specified", arg0.Line, arg0.Column)
+					}
+				} else {
+					if v, exists := obj[subfield]; exists {
+						num = v
+					} else {
+						if defaultVal != nil {
+							num = defaultVal
+						} else {
+							return nil, errors.NewFunctionCallError(fmt.Sprintf("math.sum: field '%s' missing in element", subfield), arg0.Line, arg0.Column)
+						}
+					}
+				}
+			} else {
+				num = elem
+			}
+			nf, ok := types.ToFloat(num)
+			if !ok {
+				return nil, errors.NewTypeError("math.sum: element is not numeric", arg0.Line, arg0.Column)
+			}
+			// Enforce uniform numeric type: no implicit conversion between int and float.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
+			sum += nf
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(sum), nil
+		}
+		return sum, nil
+
+	case "min":
+		if len(args) < 1 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("math.min requires 1 to 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("math.min requires 1 to 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.min: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		var subfield string
+		var defaultVal interface{}
+		if len(args) >= 2 {
+			arg1 := args[1]
+			sf, ok := arg1.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("math.min: second argument must be string", arg1.Line, arg1.Column)
+			}
+			subfield = sf
+		}
+		if len(args) == 3 {
+			defaultVal = args[2].Value
+		}
+		if len(arr) == 0 {
+			if defaultVal != nil {
+				return defaultVal, nil
+			}
+			return nil, errors.NewFunctionCallError("math.min: array is empty", arg0.Line, arg0.Column)
+		}
+		var m float64
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
+		first := true
+		for _, elem := range arr {
+			var num interface{}
+			if subfield != "" {
+				obj, ok := types.ConvertToStringMap(elem)
+				if !ok {
+					if defaultVal != nil {
+						num = defaultVal
+					} else {
+						return nil, errors.NewFunctionCallError("math.min: element is not an object and subfield specified", arg0.Line, arg0.Column)
+					}
+				} else {
+					if v, exists := obj[subfield]; exists {
+						num = v
+					} else {
+						if defaultVal != nil {
+							num = defaultVal
+						} else {
+							return nil, errors.NewFunctionCallError(fmt.Sprintf("math.min: field '%s' missing in element", subfield), arg0.Line, arg0.Column)
+						}
+					}
+				}
+			} else {
+				num = elem
+			}
+			nf, ok := types.ToFloat(num)
+			if !ok {
+				return nil, errors.NewTypeError("math.min: element is not numeric", arg0.Line, arg0.Column)
+			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
+			if first {
+				m = nf
+				first = false
+			} else {
+				if nf < m {
+					m = nf
+				}
+			}
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(m), nil
+		}
+		return m, nil
+
+	case "max":
+		if len(args) < 1 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("math.max requires 1 to 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("math.max requires 1 to 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.max: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		var subfield string
+		var defaultVal interface{}
+		if len(args) >= 2 {
+			arg1 := args[1]
+			sf, ok := arg1.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("math.max: second argument must be string", arg1.Line, arg1.Column)
+			}
+			subfield = sf
+		}
+		if len(args) == 3 {
+			defaultVal = args[2].Value
+		}
+		if len(arr) == 0 {
+			if defaultVal != nil {
+				return defaultVal, nil
+			}
+			return nil, errors.NewFunctionCallError("math.max: array is empty", arg0.Line, arg0.Column)
+		}
+		var m float64
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
+		first := true
+		for _, elem := range arr {
+			var num interface{}
+			if subfield != "" {
+				obj, ok := types.ConvertToStringMap(elem)
+				if !ok {
+					if defaultVal != nil {
+						num = defaultVal
+					} else {
+						return nil, errors.NewFunctionCallError("math.max: element is not an object and subfield specified", arg0.Line, arg0.Column)
+					}
+				} else {
+					if v, exists := obj[subfield]; exists {
+						num = v
+					} else {
+						if defaultVal != nil {
+							num = defaultVal
+						} else {
+							return nil, errors.NewFunctionCallError(fmt.Sprintf("math.max: field '%s' missing in element", subfield), arg0.Line, arg0.Column)
+						}
+					}
+				}
+			} else {
+				num = elem
+			}
+			nf, ok := types.ToFloat(num)
+			if !ok {
+				return nil, errors.NewTypeError("math.max: element is not numeric", arg0.Line, arg0.Column)
+			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
+			if first {
+				m = nf
+				first = false
+			} else {
+				if nf > m {
+					m = nf
+				}
+			}
+		}
+		if firstNumericTypeSet && firstIsInt {
+			return int64(m), nil
+		}
+		return m, nil
+
+	case "avg":
+		if len(args) < 1 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("math.avg requires 1 to 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("math.avg requires 1 to 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arr, ok := types.ConvertToInterfaceSlice(arg0.Value)
+		if !ok {
+			return nil, errors.NewTypeError("math.avg: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		var subfield string
+		var defaultVal interface{}
+		if len(args) >= 2 {
+			arg1 := args[1]
+			sf, ok := arg1.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("math.avg: second argument must be string", arg1.Line, arg1.Column)
+			}
+			subfield = sf
+		}
+		if len(args) == 3 {
+			defaultVal = args[2].Value
+		}
+		if len(arr) == 0 {
+			if defaultVal != nil {
+				return defaultVal, nil
+			}
+			return nil, errors.NewFunctionCallError("math.avg: array is empty", arg0.Line, arg0.Column)
+		}
+		sum := 0.0
+		count := 0
+		var firstNumericTypeSet bool = false
+		var firstIsInt bool = false
+		for _, elem := range arr {
+			var num interface{}
+			if subfield != "" {
+				obj, ok := types.ConvertToStringMap(elem)
+				if !ok {
+					return nil, errors.NewFunctionCallError("math.avg: element is not an object and subfield specified", arg0.Line, arg0.Column)
+				}
+				if v, exists := obj[subfield]; exists {
+					num = v
+				} else {
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("math.avg: field '%s' missing in element", subfield), arg0.Line, arg0.Column)
+				}
+			} else {
+				num = elem
+			}
+			nf, ok := types.ToFloat(num)
+			if !ok {
+				return nil, errors.NewTypeError("math.avg: element is not numeric", arg0.Line, arg0.Column)
+			}
+			// Enforce uniform numeric type.
+			if !firstNumericTypeSet {
+				firstIsInt = types.IsInt(num)
+				firstNumericTypeSet = true
+			} else {
+				if types.IsInt(num) != firstIsInt {
+					return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", arg0.Line, arg0.Column)
+				}
+			}
+			sum += nf
+			count++
+		}
+		// For average, always return a float (to account for fractional averages).
+		return sum / float64(count), nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown math function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/math.go" ----------
+// --------- FILE START: "pkg/env/libraries/regex.go" (size: 3514 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"regexp"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// RegexLib implements regex functions.
+type RegexLib struct{}
+
+func NewRegexLib() *RegexLib {
+	return &RegexLib{}
+}
+
+func (r *RegexLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "match":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("regex.match requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		pattern, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.match: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		s, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.match: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, errors.NewTypeError("regex.match: invalid pattern", arg0.Line, arg0.Column)
+		}
+		return re.MatchString(s), nil
+
+	case "replace":
+		if len(args) < 3 || len(args) > 4 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("regex.replace requires 3 or 4 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("regex.replace requires 3 or 4 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		arg2 := args[2]
+		s, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.replace: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		pattern, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.replace: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		replacement, ok := arg2.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.replace: third argument must be a string", arg2.Line, arg2.Column)
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, errors.NewTypeError("regex.replace: invalid pattern", arg1.Line, arg1.Column)
+		}
+		if len(args) == 3 {
+			return re.ReplaceAllString(s, replacement), nil
+		}
+		arg3 := args[3]
+		lArg, ok := types.ToInt(arg3.Value)
+		if !ok {
+			return nil, errors.NewTypeError("regex.replace: fourth argument must be numeric", arg3.Line, arg3.Column)
+		}
+		limit := int(lArg)
+		result := s
+		for i := 0; i < limit; i++ {
+			loc := re.FindStringIndex(result)
+			if loc == nil {
+				break
+			}
+			replaced := re.ReplaceAllString(result[loc[0]:loc[1]], replacement)
+			result = result[:loc[0]] + replaced + result[loc[1]:]
+		}
+		return result, nil
+
+	case "find":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("regex.find requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		pattern, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.find: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		s, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("regex.find: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, errors.NewTypeError("regex.find: invalid pattern", arg0.Line, arg0.Column)
+		}
+		match := re.FindString(s)
+		if match == "" {
+			return "", nil
+		}
+		return match, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown regex function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/regex.go" ----------
+// --------- FILE START: "pkg/env/libraries/string.go" (size: 8461 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"strings"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// StringLib implements string manipulation functions.
+type StringLib struct{}
+
+func NewStringLib() *StringLib {
+	return &StringLib{}
+}
+
+func (s *StringLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "concat":
+		if len(args) < 1 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("string.concat requires at least 1 argument", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("string.concat requires at least 1 argument", lastArg.Line, lastArg.Column)
+		}
+		var sb strings.Builder
+		for _, arg := range args {
+			str, ok := arg.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("string.concat: all arguments must be strings", arg.Line, arg.Column)
+			}
+			sb.WriteString(str)
+		}
+		return sb.String(), nil
+
+	case "toLower":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("string.toLower requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.toLower: argument must be string", arg0.Line, arg0.Column)
+		}
+		return strings.ToLower(str), nil
+
+	case "toUpper":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("string.toUpper requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.toUpper: argument must be string", arg0.Line, arg0.Column)
+		}
+		return strings.ToUpper(str), nil
+
+	case "trim":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("string.trim requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.trim: argument must be string", arg0.Line, arg0.Column)
+		}
+		return strings.TrimSpace(str), nil
+
+	case "startsWith":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("string.startsWith requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.startsWith: first argument must be string", arg0.Line, arg0.Column)
+		}
+		prefix, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.startsWith: second argument must be string", arg1.Line, arg1.Column)
+		}
+		return strings.HasPrefix(str, prefix), nil
+
+	case "endsWith":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("string.endsWith requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.endsWith: first argument must be string", arg0.Line, arg0.Column)
+		}
+		suffix, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.endsWith: second argument must be string", arg1.Line, arg1.Column)
+		}
+		return strings.HasSuffix(str, suffix), nil
+
+	case "contains":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("string.contains requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.contains: first argument must be string", arg0.Line, arg0.Column)
+		}
+		substr, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.contains: second argument must be string", arg1.Line, arg1.Column)
+		}
+		return strings.Contains(str, substr), nil
+
+	case "split":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("string.split requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.split: first argument must be string", arg0.Line, arg0.Column)
+		}
+		delim, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.split: second argument must be string", arg1.Line, arg1.Column)
+		}
+		return strings.Split(str, delim), nil
+
+	case "join":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("string.join requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		arr, ok := arg0.Value.([]interface{})
+		if !ok {
+			return nil, errors.NewTypeError("string.join: first argument must be an array", arg0.Line, arg0.Column)
+		}
+		sep, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.join: second argument must be string", arg1.Line, arg1.Column)
+		}
+		var parts []string
+		for _, item := range arr {
+			s, ok := item.(string)
+			if !ok {
+				return nil, errors.NewTypeError("string.join: all array elements must be strings", arg0.Line, arg0.Column)
+			}
+			parts = append(parts, s)
+		}
+		return strings.Join(parts, sep), nil
+
+	case "substring":
+		if len(args) != 3 {
+			return nil, errors.NewParameterError("string.substring requires 3 arguments", line, col)
+		}
+		arg0 := args[0]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.substring: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		start, ok := types.ToInt(arg1.Value)
+		if !ok {
+			return nil, errors.NewTypeError("string.substring: second argument must be an integer", arg1.Line, arg1.Column)
+		}
+		arg2 := args[2]
+		length, ok := types.ToInt(arg2.Value)
+		if !ok {
+			return nil, errors.NewTypeError("string.substring: third argument must be an integer", arg2.Line, arg2.Column)
+		}
+		runes := []rune(str)
+		if int(start) < 0 || int(start) >= len(runes) {
+			return nil, errors.NewFunctionCallError("string.substring: start index out of bounds", arg1.Line, arg1.Column)
+		}
+		end := int(start) + int(length)
+		if end > len(runes) {
+			end = len(runes)
+		}
+		return string(runes[int(start):end]), nil
+
+	case "replace":
+		if len(args) < 3 || len(args) > 4 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("string.replace requires 3 or 4 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("string.replace requires 3 or 4 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		arg2 := args[2]
+		sArg, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.replace: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		oldArg, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.replace: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		newArg, ok := arg2.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.replace: third argument must be a string", arg2.Line, arg2.Column)
+		}
+		limit := -1
+		if len(args) == 4 {
+			arg3 := args[3]
+			lArg, ok := types.ToInt(arg3.Value)
+			if !ok {
+				return nil, errors.NewTypeError("string.replace: fourth argument must be numeric", arg3.Line, arg3.Column)
+			}
+			limit = int(lArg)
+		}
+		if limit < 0 {
+			return strings.ReplaceAll(sArg, oldArg, newArg), nil
+		}
+		return strings.Replace(sArg, oldArg, newArg, limit), nil
+
+	case "indexOf":
+		if len(args) < 2 || len(args) > 3 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("string.indexOf requires 2 or 3 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("string.indexOf requires 2 or 3 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		str, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.indexOf: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		substr, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("string.indexOf: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		fromIndex := 0
+		if len(args) == 3 {
+			arg2 := args[2]
+			idx, ok := types.ToInt(arg2.Value)
+			if !ok {
+				return nil, errors.NewTypeError("string.indexOf: third argument must be numeric", arg2.Line, arg2.Column)
+			}
+			fromIndex = int(idx)
+		}
+		if fromIndex < 0 || fromIndex >= len(str) {
+			return -1, nil
+		}
+		idx := strings.Index(str[fromIndex:], substr)
+		if idx < 0 {
+			return -1, nil
+		}
+		return fromIndex + idx, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown string function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/string.go" ----------
+// --------- FILE START: "pkg/env/libraries/time.go" (size: 10479 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+type TimeValue struct {
+	EpochMillis int64
+	Zone        string
+}
+
+func newTimeValue(t time.Time) TimeValue {
+	return TimeValue{
+		EpochMillis: t.UnixNano() / int64(time.Millisecond),
+		Zone:        t.Location().String(),
+	}
+}
+
+type TimeLib struct{}
+
+func NewTimeLib() *TimeLib {
+	return &TimeLib{}
+}
+
+func (t *TimeLib) Call(functionName string, args []param.Arg, line, col, parenLine, parenCol int) (interface{}, error) {
+	switch functionName {
+	case "now":
+		if len(args) != 0 {
+			return nil, errors.NewParameterError("time.now() takes no arguments", line, col)
+		}
+		now := time.Now().UTC()
+		return newTimeValue(now), nil
+
+	case "parse":
+		if len(args) < 2 {
+			if len(args) == 0 {
+				return nil, errors.NewParameterError("time.parse requires at least 2 arguments", parenLine, parenCol)
+			}
+			lastArg := args[len(args)-1]
+			return nil, errors.NewParameterError("time.parse requires at least 2 arguments", lastArg.Line, lastArg.Column)
+		}
+		arg0 := args[0]
+		inputStr, ok := arg0.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("time.parse: first argument must be a string", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		format, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("time.parse: second argument must be a string", arg1.Line, arg1.Column)
+		}
+		var tTime time.Time
+		var err error
+		switch format {
+		case "iso8601":
+			tTime, err = time.Parse(time.RFC3339Nano, inputStr)
+		case "dateOnly":
+			tTime, err = time.Parse("2006-01-02", inputStr)
+		case "epochMillis":
+			ms, err2 := strconv.ParseInt(inputStr, 10, 64)
+			if err2 != nil {
+				return nil, errors.NewTypeError("time.parse: invalid epochMillis", arg0.Line, arg0.Column)
+			}
+			return TimeValue{EpochMillis: ms, Zone: "UTC"}, nil
+		case "rfc2822":
+			tTime, err = time.Parse(time.RFC1123Z, inputStr)
+		case "custom":
+			if len(args) != 3 {
+				return nil, errors.NewParameterError("time.parse with 'custom' requires a formatDetails argument", line, col)
+			}
+			arg2 := args[2]
+			formatDetails, ok := arg2.Value.(string)
+			if !ok {
+				return nil, errors.NewTypeError("time.parse: formatDetails must be a string", arg2.Line, arg2.Column)
+			}
+			tTime, err = time.Parse(formatDetails, inputStr)
+		default:
+			return nil, errors.NewTypeError("time.parse: unknown format", arg1.Line, arg1.Column)
+		}
+		if err != nil {
+			return nil, errors.NewTypeError("time.parse error: "+err.Error(), arg0.Line, arg0.Column)
+		}
+		return newTimeValue(tTime.UTC()), nil
+
+	case "add":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.add requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.add: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		dur, ok := types.ToInt(arg1.Value)
+		if !ok {
+			return nil, errors.NewTypeError("time.add: second argument must be numeric", arg1.Line, arg1.Column)
+		}
+		return TimeValue{EpochMillis: tv.EpochMillis + dur, Zone: tv.Zone}, nil
+
+	case "subtract":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.subtract requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.subtract: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		dur, ok := types.ToInt(arg1.Value)
+		if !ok {
+			return nil, errors.NewTypeError("time.subtract: second argument must be numeric", arg1.Line, arg1.Column)
+		}
+		return TimeValue{EpochMillis: tv.EpochMillis - dur, Zone: tv.Zone}, nil
+
+	case "diff":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.diff requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		tv1, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.diff: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		tv2, ok := arg1.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.diff: second argument must be Time", arg1.Line, arg1.Column)
+		}
+		return tv1.EpochMillis - tv2.EpochMillis, nil
+
+	case "isBefore":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.isBefore requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		tv1, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.isBefore: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		tv2, ok := arg1.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.isBefore: second argument must be Time", arg1.Line, arg1.Column)
+		}
+		return tv1.EpochMillis < tv2.EpochMillis, nil
+
+	case "isAfter":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.isAfter requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		arg1 := args[1]
+		tv1, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.isAfter: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		tv2, ok := arg1.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.isAfter: second argument must be Time", arg1.Line, arg1.Column)
+		}
+		return tv1.EpochMillis > tv2.EpochMillis, nil
+
+	case "isEqual":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.isEqual requires 2 arguments", line, col)
+		}
+		tv1, ok1 := args[0].Value.(TimeValue)
+		if !ok1 {
+			return nil, errors.NewTypeError("time.isEqual: first argument must be Time", args[0].Line, args[0].Column)
+		}
+		tv2, ok2 := args[1].Value.(TimeValue)
+		if !ok2 {
+			return nil, errors.NewTypeError("time.isEqual: second argument must be Time", args[1].Line, args[1].Column)
+		}
+		return tv1.EpochMillis == tv2.EpochMillis, nil
+
+	case "toEpochMillis":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.toEpochMillis requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.toEpochMillis: argument must be Time", arg0.Line, arg0.Column)
+		}
+		return tv.EpochMillis, nil
+
+	case "format":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.format requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.format: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		formatStr, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("time.format: second argument must be string", arg1.Line, arg1.Column)
+		}
+		// Use ISO8601 (RFC3339Nano) as default if format string is empty.
+		if strings.TrimSpace(formatStr) == "" {
+			formatStr = time.RFC3339Nano
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		return tTime.Format(formatStr), nil
+
+	case "getYear":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.getYear requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.getYear: argument must be Time", arg0.Line, arg0.Column)
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		return int64(tTime.Year()), nil
+
+	case "getMonth":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.getMonth requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.getMonth: argument must be Time", arg0.Line, arg0.Column)
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		return int64(tTime.Month()), nil
+
+	case "getDay":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.getDay requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.getDay: argument must be Time", arg0.Line, arg0.Column)
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		return int64(tTime.Day()), nil
+
+	case "startOfDay":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.startOfDay requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.startOfDay: argument must be Time", arg0.Line, arg0.Column)
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		start := time.Date(tTime.Year(), tTime.Month(), tTime.Day(), 0, 0, 0, 0, loc)
+		return newTimeValue(start), nil
+
+	case "endOfDay":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("time.endOfDay requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.endOfDay: argument must be Time", arg0.Line, arg0.Column)
+		}
+		loc, err := time.LoadLocation(tv.Zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		tTime := time.Unix(0, tv.EpochMillis*int64(time.Millisecond)).In(loc)
+		end := time.Date(tTime.Year(), tTime.Month(), tTime.Day(), 23, 59, 59, int(time.Millisecond*999), loc)
+		return newTimeValue(end), nil
+
+	case "withZone":
+		if len(args) != 2 {
+			return nil, errors.NewParameterError("time.withZone requires 2 arguments", line, col)
+		}
+		arg0 := args[0]
+		tv, ok := arg0.Value.(TimeValue)
+		if !ok {
+			return nil, errors.NewTypeError("time.withZone: first argument must be Time", arg0.Line, arg0.Column)
+		}
+		arg1 := args[1]
+		zoneName, ok := arg1.Value.(string)
+		if !ok {
+			return nil, errors.NewTypeError("time.withZone: second argument must be string", arg1.Line, arg1.Column)
+		}
+		loc, err := time.LoadLocation(zoneName)
+		if err != nil {
+			return nil, errors.NewTypeError("time.withZone: invalid zone name", arg1.Line, arg1.Column)
+		}
+		return TimeValue{EpochMillis: tv.EpochMillis, Zone: loc.String()}, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown time function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/time.go" ----------
+// --------- FILE START: "pkg/env/libraries/type.go" (size: 6730 bytes, modtime: 2025-02-21T21:49:11-05:00) ----------
+package libraries
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"strconv"
+	"strings"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// TypeLib implements type conversion and type-checking functions.
+type TypeLib struct{}
+
+func NewTypeLib() *TypeLib {
+	return &TypeLib{}
+}
+
+func (t *TypeLib) Call(functionName string, args []param.Arg, line, col, _, _ int) (interface{}, error) {
+	switch functionName {
+	case "string":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.string requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		if arg0.Value == nil {
+			return "", nil
+		}
+		return fmt.Sprintf("%v", arg0.Value), nil
+
+	case "int":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.int requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		if arg0.Value == nil {
+			return int64(0), nil
+		}
+		switch v := arg0.Value.(type) {
+		case string:
+			s := strings.TrimSpace(v)
+			if len(s) >= 2 {
+				if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+					s = s[1 : len(s)-1]
+				}
+			}
+			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return i, nil
+			}
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				return int64(f), nil
+			}
+			return nil, errors.NewFunctionCallError(fmt.Sprintf("type.int: string '%s' cannot be converted to int", v), arg0.Line, arg0.Column)
+		default:
+			num, ok := types.ToFloat(arg0.Value)
+			if !ok {
+				return nil, errors.NewTypeError("type.int: argument cannot be converted to int", arg0.Line, arg0.Column)
+			}
+			return int64(num), nil
+		}
+
+	case "float":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.float requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		if arg0.Value == nil {
+			return 0.0, nil
+		}
+		switch v := arg0.Value.(type) {
+		case string:
+			s := strings.TrimSpace(v)
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				return f, nil
+			} else {
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("type.float: string '%s' cannot be converted to float", v), arg0.Line, arg0.Column)
+			}
+		default:
+			num, ok := types.ToFloat(arg0.Value)
+			if !ok {
+				return nil, errors.NewTypeError("type.float: argument cannot be converted to float", arg0.Line, arg0.Column)
+			}
+			return num, nil
+		}
+
+	case "intArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.intArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("intArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]int64, len(arr))
+		for i, elem := range arr {
+			var iVal int64
+			var convOk bool
+			if s, isString := elem.(string); isString {
+				s = strings.TrimSpace(s)
+				parsed, err := strconv.ParseInt(s, 10, 64)
+				if err != nil {
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("intArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+				}
+				iVal = parsed
+				convOk = true
+			} else {
+				iVal, convOk = types.ToInt(elem)
+			}
+			if !convOk {
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("intArray: element at index %d (%v) is not convertible to int", i, elem), args[0].Line, args[0].Column)
+			}
+			temp[i] = iVal
+		}
+		// Convert []int64 to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, v := range temp {
+			result[i] = v
+		}
+		return result, nil
+
+	case "floatArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.floatArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("floatArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]float64, len(arr))
+		for i, elem := range arr {
+			var fVal float64
+			var convOk bool
+			if s, isString := elem.(string); isString {
+				s = strings.TrimSpace(s)
+				parsed, err := strconv.ParseFloat(s, 64)
+				if err != nil {
+					return nil, errors.NewFunctionCallError(fmt.Sprintf("floatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+				}
+				fVal = parsed
+				convOk = true
+			} else {
+				fVal, convOk = types.ToFloat(elem)
+			}
+			if !convOk {
+				return nil, errors.NewFunctionCallError(fmt.Sprintf("floatArray: element at index %d (%v) is not convertible to float", i, elem), args[0].Line, args[0].Column)
+			}
+			temp[i] = fVal
+		}
+		// Convert []float64 to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, v := range temp {
+			result[i] = v
+		}
+		return result, nil
+
+	case "stringArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.floatArray requires 1 argument", line, col)
+		}
+		arr, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		if !ok {
+			return nil, errors.NewFunctionCallError("floatArray: value is not an array", args[0].Line, args[0].Column)
+		}
+		temp := make([]string, len(arr))
+		for i, elem := range arr {
+			s, ok := elem.(string)
+			if !ok {
+				s = fmt.Sprintf("%v", elem)
+			}
+			temp[i] = s
+		}
+		// Convert []string to []interface{}
+		result := make([]interface{}, len(temp))
+		for i, s := range temp {
+			result[i] = s
+		}
+		return result, nil
+
+	case "isNumber":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isNumber requires 1 argument", line, col)
+		}
+		arg0 := args[0]
+		switch v := arg0.Value.(type) {
+		case string:
+			_, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			return err == nil, nil
+		default:
+			_, ok := types.ToFloat(arg0.Value)
+			return ok, nil
+		}
+
+	case "isString":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isString requires 1 argument", line, col)
+		}
+		_, ok := args[0].Value.(string)
+		return ok, nil
+
+	case "isBoolean":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isBoolean requires 1 argument", line, col)
+		}
+		_, ok := args[0].Value.(bool)
+		return ok, nil
+
+	case "isArray":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isArray requires 1 argument", line, col)
+		}
+		_, ok := types.ConvertToInterfaceSlice(args[0].Value)
+		return ok, nil
+
+	case "isObject":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isObject requires 1 argument", line, col)
+		}
+		_, ok := types.ConvertToStringMap(args[0].Value)
+		return ok, nil
+
+	case "isNull":
+		if len(args) != 1 {
+			return nil, errors.NewParameterError("type.isNull requires 1 argument", line, col)
+		}
+		return args[0].Value == nil, nil
+
+	default:
+		return nil, errors.NewFunctionCallError(fmt.Sprintf("unknown type function '%s'", functionName), 0, 0)
+	}
+}
+// --------- FILE END: "pkg/env/libraries/type.go" ----------
+// --------- FILE START: "pkg/env/interface.go" (size: 249 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package env
+
+import "github.com/SpecDrivenDesign/lql/pkg/param"
+
+// ILibrary is the interface for DSL libraries.
+type ILibrary interface {
+	Call(functionName string, args []param.Arg, line, column, parenLine, parenColumn int) (interface{}, error)
+}
+// --------- FILE END: "pkg/env/interface.go" ----------
+// --------- FILE START: "pkg/ast/expressions/binary.go" (size: 4930 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+)
+
+// BinaryExpr represents a binary operation.
+type BinaryExpr struct {
+	Left     ast.Expression
+	Operator tokens.TokenType
+	Right    ast.Expression
+	Line     int
+	Column   int
+}
+
+func (b *BinaryExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	switch b.Operator {
+	case tokens.TokenAnd:
+		// Short-circuit: evaluate left operand first.
+		leftVal, err := b.Left.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		lb, ok := leftVal.(bool)
+		if !ok {
+			return nil, errors.NewSemanticError("AND operator requires boolean operand", b.Line, b.Column)
+		}
+		if !lb {
+			return false, nil
+		}
+		rightVal, err := b.Right.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		rb, ok := rightVal.(bool)
+		if !ok {
+			return nil, errors.NewSemanticError("AND operator requires boolean operand", b.Line, b.Column)
+		}
+		return rb, nil
+
+	case tokens.TokenOr:
+		// Short-circuit: evaluate left operand first.
+		leftVal, err := b.Left.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		lb, ok := leftVal.(bool)
+		if !ok {
+			return nil, errors.NewSemanticError("OR operator requires boolean operand", b.Line, b.Column)
+		}
+		if lb {
+			return true, nil
+		}
+		rightVal, err := b.Right.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		rb, ok := rightVal.(bool)
+		if !ok {
+			return nil, errors.NewSemanticError("OR operator requires boolean operand", b.Line, b.Column)
+		}
+		return rb, nil
+
+	default:
+		// Evaluate both operands for other operators.
+		leftVal, err := b.Left.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		rightVal, err := b.Right.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		switch b.Operator {
+		case tokens.TokenPlus:
+			ln, lok := types.ToFloat(leftVal)
+			rn, rok := types.ToFloat(rightVal)
+			if !lok || !rok {
+				return nil, errors.NewSemanticError("'+' operator used on non‑numeric type", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) != types.IsInt(rightVal) {
+				return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) {
+				return int64(ln + rn), nil
+			}
+			return ln + rn, nil
+
+		case tokens.TokenMinus:
+			ln, lok := types.ToFloat(leftVal)
+			rn, rok := types.ToFloat(rightVal)
+			if !lok || !rok {
+				return nil, errors.NewSemanticError("'-' operator used on non‑numeric type", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) != types.IsInt(rightVal) {
+				return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) {
+				return int64(ln - rn), nil
+			}
+			return ln - rn, nil
+
+		case tokens.TokenMultiply:
+			ln, lok := types.ToFloat(leftVal)
+			rn, rok := types.ToFloat(rightVal)
+			if !lok || !rok {
+				return nil, errors.NewSemanticError("'*' operator used on non‑numeric type", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) != types.IsInt(rightVal) {
+				return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) {
+				return int64(ln * rn), nil
+			}
+			return ln * rn, nil
+
+		case tokens.TokenDivide:
+			ln, lok := types.ToFloat(leftVal)
+			rn, rok := types.ToFloat(rightVal)
+			if !lok || !rok {
+				return nil, errors.NewSemanticError("'/' operator used on non‑numeric type", b.Line, b.Column)
+			}
+			if rn == 0 {
+				return nil, errors.NewDivideByZeroError("division by zero", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) != types.IsInt(rightVal) {
+				return nil, errors.NewSemanticError("Mixed numeric types require explicit conversion", b.Line, b.Column)
+			}
+			if types.IsInt(leftVal) {
+				return int64(ln / rn), nil
+			}
+			return ln / rn, nil
+
+		case tokens.TokenLt:
+			return types.Compare(leftVal, rightVal, "<", b.Line, b.Column)
+		case tokens.TokenGt:
+			return types.Compare(leftVal, rightVal, ">", b.Line, b.Column)
+		case tokens.TokenLte:
+			return types.Compare(leftVal, rightVal, "<=", b.Line, b.Column)
+		case tokens.TokenGte:
+			return types.Compare(leftVal, rightVal, ">=", b.Line, b.Column)
+		case tokens.TokenEq:
+			return types.Equals(leftVal, rightVal), nil
+		case tokens.TokenNeq:
+			return !types.Equals(leftVal, rightVal), nil
+		}
+	}
+	return nil, errors.NewUnknownOperatorError("unknown binary operator", b.Line, b.Column)
+}
+
+func (b *BinaryExpr) Pos() (int, int) {
+	return b.Line, b.Column
+}
+
+func (b *BinaryExpr) String() string {
+	leftStr := b.Left.String()
+	rightStr := b.Right.String()
+	opStr := tokens.FixedTokenLiterals[b.Operator]
+	if ColorEnabled {
+		opStr = OperatorColor + opStr + ColorReset
+	}
+	return fmt.Sprintf("%s %s %s", leftStr, opStr, rightStr)
+}
+// --------- FILE END: "pkg/ast/expressions/binary.go" ----------
+// --------- FILE START: "pkg/tokens/tokens.go" (size: 2484 bytes, modtime: 2025-02-21T22:58:17-05:00) ----------
+package tokens
+
+const HeaderMagic = "STOK" // 4-byte header magic
+
+// TokenType defines the type for tokens.
+type TokenType uint8
+
+const (
+	TokenEof TokenType = iota
+	TokenIllegal
+	TokenIdent
+	TokenNumber
+	TokenString
+	TokenBool
+	TokenNull
+	TokenPlus
+	TokenMinus
+	TokenMultiply
+	TokenDivide
+	TokenLt
+	TokenGt
+	TokenLte
+	TokenGte
+	TokenEq
+	TokenNeq
+	TokenAnd
+	TokenOr
+	TokenNot
+	TokenLparen
+	TokenRparen
+	TokenLeftBracket
+	TokenRightBracket
+	TokenLeftCurly
+	TokenRightCurly
+	TokenComma
+	TokenColon
+	TokenDot
+	TokenQuestion
+	TokenQuestionDot
+	TokenQuestionBracket
+	TokenDollar
+)
+
+// Token represents a lexical token.
+type Token struct {
+	Type    TokenType
+	Literal string
+	Line    int
+	Column  int
+}
+
+// TokenTypeToByte maps each TokenType to a unique byte code.
+var TokenTypeToByte = map[TokenType]byte{
+	TokenEof:             0,
+	TokenIllegal:         1,
+	TokenIdent:           2,
+	TokenNumber:          3,
+	TokenString:          4,
+	TokenBool:            5,
+	TokenNull:            6,
+	TokenPlus:            7,
+	TokenMinus:           8,
+	TokenMultiply:        9,
+	TokenDivide:          10,
+	TokenLt:              11,
+	TokenGt:              12,
+	TokenLte:             13,
+	TokenGte:             14,
+	TokenEq:              15,
+	TokenNeq:             16,
+	TokenAnd:             17,
+	TokenOr:              18,
+	TokenNot:             19,
+	TokenLparen:          20,
+	TokenRparen:          21,
+	TokenLeftBracket:     22,
+	TokenRightBracket:    23,
+	TokenLeftCurly:       24,
+	TokenRightCurly:      25,
+	TokenComma:           26,
+	TokenColon:           27,
+	TokenDot:             28,
+	TokenQuestionDot:     30,
+	TokenQuestionBracket: 31,
+	TokenDollar:          32,
+}
+
+// FixedTokenLiterals defines fixed literal strings for tokens.
+var FixedTokenLiterals = map[TokenType]string{
+	TokenPlus:            "+",
+	TokenMinus:           "-",
+	TokenMultiply:        "*",
+	TokenDivide:          "/",
+	TokenLt:              "<",
+	TokenGt:              ">",
+	TokenLte:             "<=",
+	TokenGte:             ">=",
+	TokenEq:              "==",
+	TokenNeq:             "!=",
+	TokenAnd:             "AND",
+	TokenOr:              "OR",
+	TokenNot:             "NOT",
+	TokenLparen:          "(",
+	TokenRparen:          ")",
+	TokenLeftBracket:     "[",
+	TokenRightBracket:    "]",
+	TokenLeftCurly:       "{",
+	TokenRightCurly:      "}",
+	TokenComma:           ",",
+	TokenColon:           ":",
+	TokenDot:             ".",
+	TokenQuestionDot:     "?.",
+	TokenQuestionBracket: "?[",
+	TokenDollar:          "$",
+}
+// --------- FILE END: "pkg/tokens/tokens.go" ----------
+// --------- FILE START: "pkg/ast/expressions/color.go" (size: 4908 bytes, modtime: 2025-02-18T22:40:48-05:00) ----------
+package expressions
+
+import (
+	"os"
+	"strings"
+)
+
+// ColorEnabled controls whether we actually print ANSI escapes.
+// Set via ENABLE_COLORS=1 or =true to enable color.
+var ColorEnabled = initColorEnabled()
+
+// ANSI reset code, applied after coloring a token.
+var ColorReset = "\033[0m"
+
+// The four palette names you can choose from:
+const (
+	PaletteMild      = "mild"
+	PaletteVivid     = "vivid"
+	PaletteDracula   = "dracula"
+	PaletteSolarized = "solarized"
+)
+
+// PunctuationColor, StringColor, etc. are updated at init() time
+// based on your chosen palette. They are used throughout the DSL .String() methods.
+var (
+	PunctuationColor string
+	StringColor      string
+	NumberColor      string
+	OperatorColor    string
+	BoolNullColor    string
+	IdentifierColor  string
+	LibraryColor     string
+	FunctionColor    string
+	ContextColor     string
+)
+
+// initColorEnabled checks if ENABLE_COLORS is "1" or "true" (case-insensitive).
+func initColorEnabled() bool {
+	val := strings.ToLower(os.Getenv("ENABLE_COLORS"))
+	return val == "1" || val == "true"
+}
+
+func init() {
+	// Determine which palette to load from env var COLOR_PALETTE.
+	// If not set or unrecognized, we use "default".
+	paletteName := strings.ToLower(os.Getenv("COLOR_PALETTE"))
+	switch paletteName {
+	case PaletteVivid:
+		ApplyVividPalette()
+	case PaletteDracula:
+		ApplyDraculaPalette()
+	case PaletteSolarized:
+		ApplySolarizedPalette()
+	case PaletteMild:
+		ApplyMildPalette()
+	default:
+		ApplySolarizedPalette() // fallback
+	}
+}
+
+// applyDefaultPalette sets a "mild" or "neutral" palette.
+func ApplyMildPalette() {
+	// One Dark–inspired
+	PunctuationColor = "\033[38;2;92;99;112m"  // #5C6370 (comment-ish gray)
+	StringColor = "\033[38;2;152;195;121m"     // #98C379 (green)
+	NumberColor = "\033[38;2;209;154;102m"     // #D19A66 (orange-brown)
+	OperatorColor = "\033[38;2;198;120;221m"   // #C678DD (purple)
+	BoolNullColor = "\033[38;2;86;182;194m"    // #56B6C2 (cyan)
+	IdentifierColor = "\033[38;2;229;192;123m" // #E5C07B (yellow-gold)
+	LibraryColor = "\033[38;2;171;178;191m"    // #ABB2BF (soft foreground)
+	FunctionColor = "\033[38;2;97;175;239m"    // #61AFEF (blue)
+	ContextColor = "\033[38;2;224;108;117m"    // #E06C75 (reddish-pink)
+}
+
+// ApplyVividPalette sets a more saturated, bold color set.
+func ApplyVividPalette() {
+	// Extra bright / neon
+	PunctuationColor = "\033[38;2;255;128;0m" // bright orange
+	StringColor = "\033[38;2;255;85;85m"      // bright red/pink
+	NumberColor = "\033[38;2;0;255;0m"        // lime green
+	OperatorColor = "\033[38;2;255;0;255m"    // hot magenta
+	BoolNullColor = "\033[38;2;0;170;255m"    // bright cyan
+	IdentifierColor = "\033[38;2;255;215;0m"  // gold
+	LibraryColor = "\033[38;2;255;160;0m"     // bright orange
+	FunctionColor = "\033[38;2;85;85;255m"    // vivid blue
+	ContextColor = "\033[38;2;255;20;147m"    // deep pink
+}
+
+// ApplyDraculaPalette sets colors inspired by the Dracula theme.
+func ApplyDraculaPalette() {
+	// Official Dracula color references:
+	// https://draculatheme.com/contribute
+	// background: #282a36  foreground: #f8f8f2
+	// comment: #6272a4, cyan: #8be9fd, green: #50fa7b, orange: #ffb86c,
+	// pink: #ff79c6, purple: #bd93f9, red: #ff5555, yellow: #f1fa8c
+
+	PunctuationColor = "\033[38;2;98;114;164m" // #6272a4 (used often for comments/punctuation)
+	StringColor = "\033[38;2;241;250;140m"     // #f1fa8c (yellow)
+	NumberColor = "\033[38;2;189;147;249m"     // #bd93f9 (purple)
+	OperatorColor = "\033[38;2;255;121;198m"   // #ff79c6 (pink)
+	BoolNullColor = "\033[38;2;139;233;253m"   // #8be9fd (cyan)
+	IdentifierColor = "\033[38;2;80;250;123m"  // #50fa7b (green)
+	LibraryColor = "\033[38;2;255;184;108m"    // #ffb86c (orange)
+	FunctionColor = "\033[38;2;255;85;85m"     // #ff5555 (red)
+	ContextColor = "\033[38;2;248;248;242m"    // #f8f8f2 (foreground-ish)
+}
+
+// ApplySolarizedPalette sets colors inspired by the Solarized Dark theme.
+func ApplySolarizedPalette() {
+	// Official Solarized Dark references:
+	// https://github.com/altercation/vim-colors-solarized
+	//
+	// base03: #002b36
+	// base02: #073642
+	// base01: #586e75
+	// base00: #657b83
+	// base0:  #839496
+	// base1:  #93a1a1
+	// base2:  #eee8d5
+	// base3:  #fdf6e3
+	// yellow: #b58900
+	// orange: #cb4b16
+	// red:    #dc322f
+	// magenta:#d33682
+	// violet: #6c71c4
+	// blue:   #268bd2
+	// cyan:   #2aa198
+	// green:  #859900
+
+	PunctuationColor = "\033[38;2;88;110;117m" // #586e75 (base01)
+	StringColor = "\033[38;2;42;161;152m"      // #2aa198 (cyan)
+	NumberColor = "\033[38;2;133;153;0m"       // #859900 (green)
+	OperatorColor = "\033[38;2;108;113;196m"   // #6c71c4 (violet)
+	BoolNullColor = "\033[38;2;38;139;210m"    // #268bd2 (blue)
+	IdentifierColor = "\033[38;2;181;137;0m"   // #b58900 (yellow)
+	LibraryColor = "\033[38;2;147;161;161m"    // #93a1a1 (base1)
+	FunctionColor = "\033[38;2;211;54;130m"    // #d33682 (magenta)
+	ContextColor = "\033[38;2;203;75;22m"      // #cb4b16 (orange)
+}
+// --------- FILE END: "pkg/ast/expressions/color.go" ----------
+// --------- FILE START: "pkg/ast/expressions/context.go" (size: 1779 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// ContextExpr represents a context reference (e.g. $identifier or $[expression]).
+type ContextExpr struct {
+	Ident     *IdentifierExpr
+	Subscript ast.Expression
+	Line      int
+	Column    int
+}
+
+func (c *ContextExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	if c.Ident != nil {
+		if val, ok := ctx[c.Ident.Name]; ok {
+			return val, nil
+		}
+		return nil, errors.NewReferenceError(fmt.Sprintf("field '%s' not found", c.Ident.Name), c.Ident.Line, c.Ident.Column)
+	}
+	return ctx, nil
+}
+
+func (c *ContextExpr) Pos() (int, int) {
+	return c.Line, c.Column
+}
+
+func (c *ContextExpr) String() string {
+	// If there's an identifier, we produce something like "$myField".
+	// If there's a subscript expression, we produce something like "$[someExpr]".
+	// If both are nil, it's just "$".
+
+	// Base "$" symbol (maybe colored if ColorEnabled).
+	dollar := "$"
+	if ColorEnabled {
+		dollar = PunctuationColor + "$" + ColorReset
+	}
+
+	// If we have an identifier, we build "$ident".
+	if c.Ident != nil {
+		identName := c.Ident.Name
+		if ColorEnabled {
+			identName = ContextColor + identName + ColorReset
+		}
+		return dollar + identName
+	}
+
+	// If we have a subscript expression, build "$[ expression ]".
+	if c.Subscript != nil {
+		openBracket := "["
+		closeBracket := "]"
+
+		if ColorEnabled {
+			openBracket = PunctuationColor + "[" + ColorReset
+			closeBracket = PunctuationColor + "]" + ColorReset
+		}
+
+		subscriptStr := c.Subscript.String()
+		return dollar + openBracket + subscriptStr + closeBracket
+	}
+
+	// Otherwise, it's just "$" referencing the entire context.
+	return dollar
+}
+// --------- FILE END: "pkg/ast/expressions/context.go" ----------
+// --------- FILE START: "pkg/ast/expressions/functioncall.go" (size: 2620 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"strings"
+)
+
+// FunctionCallExpr represents a function call.
+type FunctionCallExpr struct {
+	Namespace   []string
+	Args        []ast.Expression
+	Line        int
+	Column      int
+	ParenLine   int
+	ParenColumn int
+}
+
+func (f *FunctionCallExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	if len(f.Namespace) < 2 {
+		return nil, errors.NewParameterError("function call missing namespace", f.Line, f.Column)
+	}
+	libName := f.Namespace[0]
+	funcName := f.Namespace[1]
+	lib, ok := env.GetLibrary(libName)
+	if !ok {
+		return nil, errors.NewReferenceError(fmt.Sprintf("library '%s' not found", libName), f.Line, f.Column)
+	}
+	var args []param.Arg
+	for _, argExpr := range f.Args {
+		val, err := argExpr.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		l, c := argExpr.Pos()
+		args = append(args, param.Arg{Value: val, Line: l, Column: c})
+	}
+	return lib.Call(funcName, args, f.Line, f.Column, f.ParenLine, f.ParenColumn)
+}
+
+func (f *FunctionCallExpr) Pos() (int, int) {
+	return f.Line, f.Column
+}
+func (f *FunctionCallExpr) String() string {
+	var sb strings.Builder
+
+	if len(f.Namespace) == 0 {
+		return "(missing function call)"
+	}
+
+	// The first item in the Namespace is the "library" name.
+	libraryName := f.Namespace[0]
+	if ColorEnabled {
+		libraryName = LibraryColor + libraryName + ColorReset
+	}
+
+	// If there is more than one item, the rest are the "function" name(s).
+	// We'll join them with '.' in a single string and color them all as FunctionColor.
+	var functionName string
+	if len(f.Namespace) > 1 {
+		rest := f.Namespace[1:]
+		fnStr := strings.Join(rest, ".")
+		if ColorEnabled {
+			fnStr = FunctionColor + fnStr + ColorReset
+		}
+
+		// Insert a "." (punctuation) between library and function portion
+		dot := "."
+		if ColorEnabled {
+			dot = PunctuationColor + "." + ColorReset
+		}
+		functionName = dot + fnStr
+	}
+
+	// parentheses and commas
+	openParen := "("
+	closeParen := ")"
+	comma := ", "
+	if ColorEnabled {
+		openParen = PunctuationColor + "(" + ColorReset
+		closeParen = PunctuationColor + ")" + ColorReset
+		comma = PunctuationColor + "," + ColorReset + " "
+	}
+
+	// Write out library + function portion
+	sb.WriteString(libraryName)
+	sb.WriteString(functionName)
+
+	sb.WriteString(openParen)
+
+	for i, arg := range f.Args {
+		if i > 0 {
+			sb.WriteString(comma)
+		}
+		sb.WriteString(arg.String())
+	}
+
+	sb.WriteString(closeParen)
+	return sb.String()
+}
+// --------- FILE END: "pkg/ast/expressions/functioncall.go" ----------
+// --------- FILE START: "pkg/ast/expressions/identifier.go" (size: 674 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// IdentifierExpr represents an identifier.
+type IdentifierExpr struct {
+	Name   string
+	Line   int
+	Column int
+}
+
+func (i *IdentifierExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	return nil, errors.NewUnknownIdentifierError(fmt.Sprintf("Bare identifier '%s' is not allowed", i.Name), i.Line, i.Column)
+}
+
+func (i *IdentifierExpr) Pos() (int, int) {
+	return i.Line, i.Column
+}
+func (i *IdentifierExpr) String() string {
+	if ColorEnabled {
+		return IdentifierColor + i.Name + ColorReset
+	}
+	return i.Name
+}
+// --------- FILE END: "pkg/ast/expressions/identifier.go" ----------
+// --------- FILE START: "pkg/ast/expressions/literal.go" (size: 1306 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+)
+
+// LiteralExpr represents a literal value.
+type LiteralExpr struct {
+	Value  interface{}
+	Line   int
+	Column int
+}
+
+func (l *LiteralExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	return l.Value, nil
+}
+
+func (l *LiteralExpr) Pos() (int, int) {
+	return l.Line, l.Column
+}
+func (l *LiteralExpr) String() string {
+	var s string
+
+	switch v := l.Value.(type) {
+
+	case string:
+		// Enclose strings in quotes, then optionally color.
+		s = `"` + v + `"`
+		if ColorEnabled {
+			s = StringColor + s + ColorReset
+		}
+
+	case bool:
+		// Lowercase "true"/"false" to match DSL specs, then optionally color.
+		if v {
+			s = "true"
+		} else {
+			s = "false"
+		}
+		if ColorEnabled {
+			s = BoolNullColor + s + ColorReset
+		}
+
+	case nil:
+		// null literal.
+		s = "null"
+		if ColorEnabled {
+			s = BoolNullColor + s + ColorReset
+		}
+
+	case int, int64, float64:
+		// Numeric literal -> convert to string, optionally color.
+		s = fmt.Sprintf("%v", v)
+		if ColorEnabled {
+			s = NumberColor + s + ColorReset
+		}
+
+	default:
+		// Fallback: just stringify with fmt.
+		s = fmt.Sprintf("%v", v)
+		// Optionally color if you'd like,
+		// but typically unknown types are not recognized by DSL specs.
+	}
+
+	return s
+}
+// --------- FILE END: "pkg/ast/expressions/literal.go" ----------
+// --------- FILE START: "pkg/ast/expressions/memberaccess.go" (size: 3570 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"strings"
+)
+
+// MemberPart represents a part of a member access (either dot or bracket).
+type MemberPart struct {
+	Optional bool
+	IsIndex  bool
+	Key      string
+	Expr     ast.Expression
+	Line     int
+	Column   int
+}
+
+// MemberAccessExpr represents member access (dot or bracket notation).
+type MemberAccessExpr struct {
+	Target      ast.Expression
+	AccessParts []MemberPart
+}
+
+func (m *MemberAccessExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	val, err := m.Target.Eval(ctx, env)
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range m.AccessParts {
+		if val == nil && part.Optional {
+			return nil, nil
+		}
+		if part.IsIndex {
+			indexVal, err := part.Expr.Eval(ctx, env)
+			if err != nil {
+				return nil, err
+			}
+			if obj, ok := types.ConvertToStringMap(val); ok {
+				var key string
+				switch v := indexVal.(type) {
+				case string:
+					key = v
+				default:
+					key = fmt.Sprintf("%v", v)
+				}
+				if v, exists := obj[key]; exists {
+					val = v
+				} else {
+					if part.Optional {
+						return nil, nil
+					}
+					return nil, errors.NewReferenceError(fmt.Sprintf("field '%s' not found", key), part.Line, part.Column)
+				}
+			} else if arr, ok := types.ConvertToInterfaceSlice(val); ok {
+				idx, ok := types.ToInt(indexVal)
+				if !ok {
+					return nil, errors.NewTypeError("array index must be numeric", part.Line, part.Column)
+				}
+				if idx < 0 || idx >= int64(len(arr)) {
+					if part.Optional {
+						return nil, nil
+					}
+					return nil, errors.NewArrayOutOfBoundsError("array index out of bounds", part.Line, part.Column)
+				}
+				val = arr[idx]
+			} else {
+				return nil, errors.NewTypeError("target is not an object or array", part.Line, part.Column)
+			}
+		} else {
+			obj, ok := types.ConvertToStringMap(val)
+			if !ok {
+				return nil, errors.NewTypeError("dot access on non‑object", part.Line, part.Column)
+			}
+			if v, exists := obj[part.Key]; exists {
+				val = v
+			} else {
+				if part.Optional {
+					return nil, nil
+				}
+				return nil, errors.NewReferenceError(fmt.Sprintf("field '%s' not found", part.Key), part.Line, part.Column)
+			}
+		}
+	}
+	return val, nil
+}
+
+func (m *MemberAccessExpr) Pos() (int, int) {
+	return m.Target.Pos()
+}
+func (m *MemberAccessExpr) String() string {
+	var sb strings.Builder
+
+	// Start with the string form of the target expression.
+	sb.WriteString(m.Target.String())
+
+	for _, part := range m.AccessParts {
+
+		// Optional chaining operator ('?') if part.Optional == true
+		if part.Optional {
+			if ColorEnabled {
+				sb.WriteString(PunctuationColor + "?" + ColorReset)
+			} else {
+				sb.WriteString("?")
+			}
+		}
+
+		// Bracket vs. dot notation
+		if part.IsIndex {
+			// Build something like "[expr]" or "[0]" (colored if enabled)
+			openBracket := "["
+			closeBracket := "]"
+
+			if ColorEnabled {
+				openBracket = PunctuationColor + "[" + ColorReset
+				closeBracket = PunctuationColor + "]" + ColorReset
+			}
+			sb.WriteString(openBracket)
+
+			if part.Expr != nil {
+				sb.WriteString(part.Expr.String())
+			}
+			sb.WriteString(closeBracket)
+		} else {
+			// Dot notation
+			dot := "."
+			if ColorEnabled {
+				dot = PunctuationColor + "." + ColorReset
+			}
+			sb.WriteString(dot)
+
+			keyStr := part.Key
+			if ColorEnabled {
+				keyStr = ContextColor + keyStr + ColorReset
+			}
+			sb.WriteString(keyStr)
+		}
+	}
+
+	return sb.String()
+}
+// --------- FILE END: "pkg/ast/expressions/memberaccess.go" ----------
+// --------- FILE START: "pkg/ast/expressions/objectliteral.go" (size: 1807 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"strings"
+)
+
+// ObjectLiteralExpr represents an object literal.
+type ObjectLiteralExpr struct {
+	Fields map[string]ast.Expression
+	Line   int
+	Column int
+}
+
+func (o *ObjectLiteralExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	result := make(map[string]interface{})
+	for key, expr := range o.Fields {
+		val, err := expr.Eval(ctx, env)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = val
+	}
+	return result, nil
+}
+
+func (o *ObjectLiteralExpr) Pos() (int, int) {
+	return o.Line, o.Column
+}
+func (o *ObjectLiteralExpr) String() string {
+	var sb strings.Builder
+
+	// Basic punctuation
+	openBrace := "{"
+	closeBrace := "}"
+	colon := ": "
+	comma := ", "
+
+	// If color is enabled, wrap punctuation in ANSI color codes
+	if ColorEnabled {
+		openBrace = PunctuationColor + "{" + ColorReset
+		closeBrace = PunctuationColor + "}" + ColorReset
+		colon = PunctuationColor + ":" + ColorReset + " "
+		comma = PunctuationColor + "," + ColorReset + " "
+	}
+
+	sb.WriteString(openBrace)
+
+	i := 0
+	for key, expr := range o.Fields {
+		// Insert commas between fields
+		if i > 0 {
+			sb.WriteString(comma)
+		}
+
+		// Decide how to print the key: If it's a valid identifier or not.
+		// For simplicity, always quote the key here. You could do a check if you want.
+		quotedKey := `"` + key + `"`
+		if ColorEnabled {
+			// Color the key as an identifier or as a string—your choice.
+			// We'll treat it like a string literal for consistency.
+			quotedKey = StringColor + quotedKey + ColorReset
+		}
+
+		sb.WriteString(quotedKey)
+		sb.WriteString(colon)
+
+		// The expression value
+		sb.WriteString(expr.String())
+
+		i++
+	}
+
+	sb.WriteString(closeBrace)
+	return sb.String()
+}
+// --------- FILE END: "pkg/ast/expressions/objectliteral.go" ----------
+// --------- FILE START: "pkg/ast/expressions/unary.go" (size: 2004 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package expressions
+
+import (
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+)
+
+// UnaryExpr represents a unary operation.
+type UnaryExpr struct {
+	Operator tokens.TokenType
+	Expr     ast.Expression
+	Line     int
+	Column   int
+}
+
+func (u *UnaryExpr) Eval(ctx map[string]interface{}, env *env.Environment) (interface{}, error) {
+	val, err := u.Expr.Eval(ctx, env)
+	if err != nil {
+		return nil, err
+	}
+	switch u.Operator {
+	case tokens.TokenMinus:
+		num, ok := types.ToFloat(val)
+		if !ok {
+			return nil, errors.NewSemanticError("unary '-' operator requires a numeric operand", u.Line, u.Column)
+		}
+		if types.IsInt(val) {
+			return int64(-num), nil
+		}
+		return -num, nil
+	case tokens.TokenNot:
+		b, ok := val.(bool)
+		if !ok {
+			return nil, errors.NewSemanticError("NOT operator requires a boolean operand", u.Line, u.Column)
+		}
+		return !b, nil
+	default:
+		return nil, errors.NewUnknownOperatorError("unknown unary operator", u.Line, u.Column)
+	}
+}
+
+func (u *UnaryExpr) Pos() (int, int) {
+	return u.Line, u.Column
+}
+func (u *UnaryExpr) String() string {
+	exprStr := u.Expr.String()
+
+	// Convert operator token to its DSL string form.
+	var opStr string
+	switch u.Operator {
+	case tokens.TokenMinus:
+		opStr = "-"
+	case tokens.TokenNot:
+		opStr = "NOT"
+	default:
+		// Fallback if needed; your tokens may or may not have a .String()
+		opStr = tokens.FixedTokenLiterals[u.Operator]
+	}
+
+	// Apply operator color if enabled.
+	if ColorEnabled {
+		opStr = OperatorColor + opStr + ColorReset
+	}
+
+	// For a minus operator, we typically do "-(expr)" if expression is more complex,
+	// or just "-expr" if it's a single literal or variable. For simplicity:
+	if u.Operator == tokens.TokenMinus {
+		// E.g. "-(x + y)" or "-3"
+		return opStr + exprStr
+	}
+
+	// For NOT, we often do "NOT expr" with a space.
+	return opStr + " " + exprStr
+}
+// --------- FILE END: "pkg/ast/expressions/unary.go" ----------
+// --------- FILE START: "pkg/bytecode/bytecode.go" (size: 3299 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package bytecode
+
+import (
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+)
+
+// ByteCodeReader reads tokens from a binary-encoded byte slice.
+type ByteCodeReader struct {
+	data []byte
+	pos  int
+}
+
+// NewByteCodeReader creates a new ByteCodeReader.
+func NewByteCodeReader(data []byte) *ByteCodeReader {
+	return &ByteCodeReader{
+		data: data,
+		pos:  0,
+	}
+}
+
+// NextToken decodes the next token.
+func (b *ByteCodeReader) NextToken() (tokens.Token, error) {
+	if b.pos >= len(b.data) {
+		return tokens.Token{Type: tokens.TokenEof, Literal: ""}, nil
+	}
+
+	// Read token type byte.
+	tokenTypeByte := b.data[b.pos]
+	b.pos++
+	tokenType, ok := ByteToTokenType[tokenTypeByte]
+	if !ok {
+		return tokens.Token{Type: tokens.TokenIllegal, Literal: ""}, fmt.Errorf("unknown token type code: %v", tokenTypeByte)
+	}
+
+	var literal string
+	// If the token has a fixed literal, use that.
+	if fixed, isFixed := tokens.FixedTokenLiterals[tokenType]; isFixed {
+		literal = fixed
+	} else {
+		// Otherwise, read a length-prefixed literal.
+		if b.pos+1 > len(b.data) {
+			return tokens.Token{Type: tokens.TokenIllegal, Literal: ""}, fmt.Errorf("unexpected end of data reading literal length")
+		}
+		length := b.data[b.pos]
+		b.pos++
+		if b.pos+int(length) > len(b.data) {
+			return tokens.Token{Type: tokens.TokenIllegal, Literal: ""}, fmt.Errorf("unexpected end of data reading literal")
+		}
+		literal = string(b.data[b.pos : b.pos+int(length)])
+		b.pos += int(length)
+	}
+
+	// Construct the token. Note: line/column info isn't preserved here.
+	return tokens.Token{
+		Type:    tokenType,
+		Literal: literal,
+		Line:    -1,
+		Column:  -1,
+	}, nil
+}
+
+// NewByteCodeReaderFromSignedData verifies the RSA signature over the token data
+// and returns a ByteCodeReader if the signature is valid.
+func NewByteCodeReaderFromSignedData(data []byte, pub *rsa.PublicKey) (*ByteCodeReader, error) {
+	sigSize := pub.Size() // RSA signature size in bytes.
+	if len(data) < len(tokens.HeaderMagic)+4+sigSize {
+		return nil, fmt.Errorf("data too short to contain valid signed tokens")
+	}
+
+	if string(data[:len(tokens.HeaderMagic)]) != tokens.HeaderMagic {
+		return nil, fmt.Errorf("invalid header magic; expected %s", tokens.HeaderMagic)
+	}
+	pos := len(tokens.HeaderMagic)
+
+	// Read the 4-byte little-endian length of tokenData.
+	tokenDataLength := binary.LittleEndian.Uint32(data[pos : pos+4])
+	pos += 4
+
+	expectedLength := len(tokens.HeaderMagic) + 4 + int(tokenDataLength) + sigSize
+	if len(data) != expectedLength {
+		return nil, fmt.Errorf("data length mismatch: expected %d bytes, got %d", expectedLength, len(data))
+	}
+
+	tokenData := data[pos : pos+int(tokenDataLength)]
+	pos += int(tokenDataLength)
+	signature := data[pos : pos+sigSize]
+
+	// Compute SHA256 hash over tokenData.
+	hash := sha256.Sum256(tokenData)
+	// Verify the RSA signature.
+	if err := rsa.VerifyPKCS1v15(pub, crypto.SHA256, hash[:], signature); err != nil {
+		return nil, fmt.Errorf("invalid signature: %v", err)
+	}
+
+	return NewByteCodeReader(tokenData), nil
+}
+
+// And a reverse mapping to convert a byte code back to a TokenType.
+var ByteToTokenType = func() map[byte]tokens.TokenType {
+	m := make(map[byte]tokens.TokenType)
+	for tt, b := range tokens.TokenTypeToByte {
+		m[b] = tt
+	}
+	return m
+}()
+// --------- FILE END: "pkg/bytecode/bytecode.go" ----------
+// --------- FILE START: "pkg/lexer/lexer.go" (size: 12278 bytes, modtime: 2025-02-21T23:54:35-05:00) ----------
+package lexer
+
+import (
+	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+	"strconv"
+	"strings"
+
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// isHexDigit returns true if ch is a valid hexadecimal digit.
+func isHexDigit(ch byte) bool {
+	return ('0' <= ch && ch <= '9') ||
+		('a' <= ch && ch <= 'f') ||
+		('A' <= ch && ch <= 'F')
+}
+
+// Lexer holds the state of the lexer.
+type Lexer struct {
+	input        string
+	position     int
+	readPosition int
+	ch           byte
+	line         int
+	column       int
+}
+
+// NewLexer creates a new Lexer for the given input.
+func NewLexer(input string) *Lexer {
+	l := &Lexer{
+		input:  input,
+		line:   1,
+		column: 0,
+	}
+	l.readChar()
+	return l
+}
+
+// readChar reads the next character and advances positions.
+func (l *Lexer) readChar() {
+	if l.readPosition >= len(l.input) {
+		l.ch = 0
+	} else {
+		l.ch = l.input[l.readPosition]
+	}
+	l.position = l.readPosition
+	l.readPosition++
+	if l.ch == '\n' {
+		l.line++
+		l.column = 0
+	} else {
+		l.column++
+	}
+}
+
+// peekChar returns the next character without advancing the lexer.
+func (l *Lexer) peekChar() byte {
+	if l.readPosition >= len(l.input) {
+		return 0
+	}
+	return l.input[l.readPosition]
+}
+
+// isLetter checks if a character is a letter or underscore.
+func isLetter(ch byte) bool {
+	return ('a' <= ch && ch <= 'z') ||
+		('A' <= ch && ch <= 'Z') ||
+		ch == '_'
+}
+
+// isDigit checks if a character is a digit.
+func isDigit(ch byte) bool {
+	return '0' <= ch && ch <= '9'
+}
+
+// skipWhitespace skips over spaces, tabs, newlines, and also skips comments (lines starting with "#").
+func (l *Lexer) skipWhitespace() {
+	// Skip normal whitespace.
+	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+		l.readChar()
+	}
+	// If a comment is encountered (line starts with "#"), skip until newline.
+	for l.ch == '#' {
+		for l.ch != '\n' && l.ch != 0 {
+			l.readChar()
+		}
+		// Skip the newline.
+		l.readChar()
+		// Skip any whitespace after the comment.
+		for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+			l.readChar()
+		}
+	}
+}
+
+// NextToken lexes and returns the next token.
+func (l *Lexer) NextToken() (tokens.Token, error) {
+	var tok tokens.Token
+
+	l.skipWhitespace()
+	startLine := l.line
+	startColumn := l.column
+
+	switch l.ch {
+	case '+':
+		tok = tokens.Token{Type: tokens.TokenPlus, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '-':
+		tok = tokens.Token{Type: tokens.TokenMinus, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '*':
+		tok = tokens.Token{Type: tokens.TokenMultiply, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '/':
+		tok = tokens.Token{Type: tokens.TokenDivide, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '<':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenLte, Literal: "<=", Line: startLine, Column: startColumn}
+		} else {
+			tok = tokens.Token{Type: tokens.TokenLt, Literal: string(l.ch), Line: startLine, Column: startColumn}
+		}
+	case '>':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenGte, Literal: ">=", Line: startLine, Column: startColumn}
+		} else {
+			tok = tokens.Token{Type: tokens.TokenGt, Literal: string(l.ch), Line: startLine, Column: startColumn}
+		}
+	case '=':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenEq, Literal: "==", Line: startLine, Column: startColumn}
+		} else {
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
+		}
+	case '!':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenNeq, Literal: "!=", Line: startLine, Column: startColumn}
+		} else {
+			tok = tokens.Token{Type: tokens.TokenNot, Literal: string(l.ch), Line: startLine, Column: startColumn}
+		}
+	case '&':
+		if l.peekChar() == '&' {
+			ch := l.ch
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenAnd, Literal: string(ch) + string(l.ch), Line: startLine, Column: startColumn}
+		} else {
+			err := errors.NewLexicalError("Unexpected character: &", startLine, startColumn)
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
+			l.readChar()
+			return tok, err
+		}
+	case '|':
+		if l.peekChar() == '|' {
+			ch := l.ch
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenOr, Literal: string(ch) + string(l.ch), Line: startLine, Column: startColumn}
+		} else {
+			err := errors.NewLexicalError("Unexpected character: |", startLine, startColumn)
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
+			l.readChar()
+			return tok, err
+		}
+	case '(':
+		tok = tokens.Token{Type: tokens.TokenLparen, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case ')':
+		tok = tokens.Token{Type: tokens.TokenRparen, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '[':
+		tok = tokens.Token{Type: tokens.TokenLeftBracket, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case ']':
+		tok = tokens.Token{Type: tokens.TokenRightBracket, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '{':
+		tok = tokens.Token{Type: tokens.TokenLeftCurly, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '}':
+		tok = tokens.Token{Type: tokens.TokenRightCurly, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case ',':
+		tok = tokens.Token{Type: tokens.TokenComma, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case ':':
+		tok = tokens.Token{Type: tokens.TokenColon, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '.':
+		tok = tokens.Token{Type: tokens.TokenDot, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '?':
+		if l.peekChar() == '.' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenQuestionDot, Literal: "?.", Line: startLine, Column: startColumn}
+		} else if l.peekChar() == '[' {
+			l.readChar()
+			tok = tokens.Token{Type: tokens.TokenQuestionBracket, Literal: "?[", Line: startLine, Column: startColumn}
+		} else {
+			err := errors.NewLexicalError("Unexpected character: "+string(l.ch), startLine, startColumn)
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
+			l.readChar()
+			return tok, err
+		}
+	case '$':
+		tok = tokens.Token{Type: tokens.TokenDollar, Literal: string(l.ch), Line: startLine, Column: startColumn}
+	case '"', '\'':
+		str, err := l.readString(l.ch)
+		if err != nil {
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: err.Error(), Line: startLine, Column: startColumn}
+			return tok, err
+		}
+		tok = tokens.Token{Type: tokens.TokenString, Literal: str, Line: startLine, Column: startColumn}
+		return tok, nil
+	case 0:
+		tok = tokens.Token{Type: tokens.TokenEof, Literal: "", Line: startLine, Column: startColumn}
+	default:
+		if isLetter(l.ch) {
+			lit := l.readIdentifier()
+			tok = tokens.Token{Type: lookupIdent(lit), Literal: lit, Line: startLine, Column: startColumn}
+			return tok, nil
+		} else if isDigit(l.ch) {
+			return l.readNumber()
+		} else {
+			err := errors.NewLexicalError("Unexpected character: "+string(l.ch), startLine, startColumn)
+			tok = tokens.Token{Type: tokens.TokenIllegal, Literal: string(l.ch), Line: startLine, Column: startColumn}
+			l.readChar()
+			return tok, err
+		}
+	}
+
+	l.readChar()
+	return tok, nil
+}
+
+func (l *Lexer) readIdentifier() string {
+	position := l.position
+	for isLetter(l.ch) || isDigit(l.ch) {
+		l.readChar()
+	}
+	return l.input[position:l.position]
+}
+
+func lookupIdent(ident string) tokens.TokenType {
+	keywords := map[string]tokens.TokenType{
+		"true":  tokens.TokenBool,
+		"false": tokens.TokenBool,
+		"null":  tokens.TokenNull,
+		"AND":   tokens.TokenAnd,
+		"OR":    tokens.TokenOr,
+		"NOT":   tokens.TokenNot,
+	}
+	if tok, ok := keywords[ident]; ok {
+		return tok
+	}
+	return tokens.TokenIdent
+}
+
+func (l *Lexer) readNumber() (tokens.Token, error) {
+	start := l.position
+	startLine := l.line
+	startColumn := l.column
+
+	if l.ch == '-' || l.ch == '+' {
+		sign := l.ch
+		l.readChar()
+		if !isDigit(l.ch) {
+			return tokens.Token{
+				Type:    tokens.TokenIllegal,
+				Literal: l.input[start:l.position],
+				Line:    startLine,
+				Column:  startColumn,
+			}, errors.NewLexicalError(fmt.Sprintf("Invalid number literal: '%c' not followed by a digit", sign), startLine, startColumn)
+		}
+	}
+
+	for isDigit(l.ch) {
+		l.readChar()
+	}
+
+	if l.ch == '.' {
+		l.readChar()
+		if !isDigit(l.ch) {
+			return tokens.Token{
+				Type:    tokens.TokenIllegal,
+				Literal: l.input[start:l.position],
+				Line:    startLine,
+				Column:  startColumn,
+			}, errors.NewLexicalError("Invalid number literal: missing digits after decimal point", startLine, l.position)
+		}
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+	}
+
+	if l.ch == 'e' || l.ch == 'E' {
+		l.readChar()
+		if l.ch == '-' || l.ch == '+' {
+			l.readChar()
+		}
+		if !isDigit(l.ch) {
+			return tokens.Token{
+				Type:    tokens.TokenIllegal,
+				Literal: l.input[start:l.position],
+				Line:    startLine,
+				Column:  startColumn,
+			}, errors.NewLexicalError("Invalid number literal: missing digits in exponent", startLine, startColumn)
+		}
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+	}
+
+	return tokens.Token{
+		Type:    tokens.TokenNumber,
+		Literal: l.input[start:l.position],
+		Line:    startLine,
+		Column:  startColumn,
+	}, nil
+}
+
+func (l *Lexer) readString(quote byte) (string, error) {
+	startLine := l.line
+	startColumn := l.column
+	var sb strings.Builder
+	escaped := false
+
+	l.readChar() // skip opening quote
+	for l.ch != 0 {
+		if escaped {
+			if l.ch == 'u' {
+				// Read next 4 hexadecimal digits.
+				hexDigits := ""
+				for i := 0; i < 4; i++ {
+					l.readChar()
+					if !isHexDigit(l.ch) {
+						return "", errors.NewLexicalError("Invalid unicode escape sequence", l.line, l.column)
+					}
+					hexDigits += string(l.ch)
+				}
+				code, err := strconv.ParseInt(hexDigits, 16, 32)
+				if err != nil {
+					return "", errors.NewLexicalError("Invalid unicode escape sequence", l.line, l.column)
+				}
+				sb.WriteRune(rune(code))
+				escaped = false
+			} else {
+				switch l.ch {
+				case 'n':
+					sb.WriteByte('\n')
+				case 'r':
+					sb.WriteByte('\r')
+				case 't':
+					sb.WriteByte('\t')
+				case '\\':
+					sb.WriteByte('\\')
+				case '"':
+					sb.WriteByte('"')
+				case '\'':
+					sb.WriteByte('\'')
+				default:
+					return "", errors.NewLexicalError("Invalid escape sequence: \\"+string(l.ch), l.line, l.column)
+				}
+			}
+			escaped = false
+		} else {
+			if l.ch == '\\' {
+				escaped = true
+			} else if l.ch == quote {
+				l.readChar()
+				return sb.String(), nil
+			} else {
+				sb.WriteByte(l.ch)
+			}
+		}
+		l.readChar()
+	}
+	return "", errors.NewLexicalError("Unclosed string literal", startLine, startColumn)
+}
+
+func (l *Lexer) ExportTokens() ([]byte, error) {
+	var buf bytes.Buffer
+	for {
+		tok, err := l.NextToken()
+		if err != nil {
+			return nil, err
+		}
+		code, ok := tokens.TokenTypeToByte[tok.Type]
+		if !ok {
+			return nil, fmt.Errorf("unknown token type: %v", tok.Type)
+		}
+		buf.WriteByte(code)
+
+		if fixed, exists := tokens.FixedTokenLiterals[tok.Type]; exists && tok.Literal == fixed {
+			// No literal data needed.
+		} else {
+			literalBytes := []byte(tok.Literal)
+			if len(literalBytes) > 255 {
+				return nil, fmt.Errorf("literal too long")
+			}
+			buf.WriteByte(byte(len(literalBytes)))
+			buf.Write(literalBytes)
+		}
+
+		if tok.Type == tokens.TokenEof {
+			break
+		}
+	}
+	return buf.Bytes(), nil
+}
+
+func (l *Lexer) ExportTokensSigned(priv *rsa.PrivateKey) ([]byte, error) {
+	tokenData, err := l.ExportTokens()
+	if err != nil {
+		return nil, err
+	}
+
+	hash := sha256.Sum256(tokenData)
+	signature, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, hash[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if len(tokenData) > int(^uint32(0)) {
+		return nil, fmt.Errorf("token data length %d exceeds maximum allowed size", len(tokenData))
+	}
+
+	tokenLen := uint32(len(tokenData))
+
+	var buf bytes.Buffer
+	buf.WriteString(tokens.HeaderMagic)
+
+	if err := binary.Write(&buf, binary.LittleEndian, tokenLen); err != nil {
+		return nil, err
+	}
+	buf.Write(tokenData)
+	buf.Write(signature)
+
+	return buf.Bytes(), nil
+}
+// --------- FILE END: "pkg/lexer/lexer.go" ----------
+// --------- FILE START: "pkg/parser/parser.go" (size: 16724 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package parser
+
+import (
+	"fmt"
+	"github.com/SpecDrivenDesign/lql/pkg/ast/expressions"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"strings"
+
+	"github.com/SpecDrivenDesign/lql/pkg/ast"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+)
+
+// TokenStream represents a stream of tokens.
+type TokenStream interface {
+	NextToken() (tokens.Token, error)
+}
+
+// Parser holds the state for parsing.
+type Parser struct {
+	lexer     TokenStream
+	curToken  tokens.Token
+	peekToken tokens.Token
+	errors    []string
+}
+
+// NewParser creates a new parser.
+func NewParser(l TokenStream) (*Parser, error) {
+	p := &Parser{
+		lexer:  l,
+		errors: []string{},
+	}
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (p *Parser) nextToken() error {
+	p.curToken = p.peekToken
+	tok, err := p.lexer.NextToken()
+	if err != nil {
+		return err
+	}
+	p.peekToken = tok
+	return nil
+}
+
+func (p *Parser) ParseExpression() (ast.Expression, error) {
+	return p.parseOrExpression()
+}
+
+const (
+	_ int = iota
+	LOWEST
+	OR
+	AND
+	EQUALS
+	GTR
+	SUM
+	PRODUCT
+	CALL
+	MEMBER
+)
+
+var precedences = map[tokens.TokenType]int{
+	tokens.TokenOr:              OR,
+	tokens.TokenAnd:             AND,
+	tokens.TokenEq:              EQUALS,
+	tokens.TokenNeq:             EQUALS,
+	tokens.TokenLt:              GTR,
+	tokens.TokenGt:              GTR,
+	tokens.TokenLte:             GTR,
+	tokens.TokenGte:             GTR,
+	tokens.TokenPlus:            SUM,
+	tokens.TokenMinus:           SUM,
+	tokens.TokenMultiply:        PRODUCT,
+	tokens.TokenDivide:          PRODUCT,
+	tokens.TokenLparen:          CALL,
+	tokens.TokenDot:             MEMBER,
+	tokens.TokenLeftBracket:     MEMBER,
+	tokens.TokenQuestionDot:     MEMBER,
+	tokens.TokenQuestionBracket: MEMBER,
+}
+
+func (p *Parser) curPrecedence() int {
+	if prec, ok := precedences[p.curToken.Type]; ok {
+		return prec
+	}
+	return LOWEST
+}
+
+func (p *Parser) peekPrecedence() int {
+	if prec, ok := precedences[p.peekToken.Type]; ok {
+		return prec
+	}
+	return LOWEST
+}
+
+func (p *Parser) parseOrExpression() (ast.Expression, error) {
+	left, err := p.parseAndExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenOr) || (p.curTokenIs(tokens.TokenIdent) && strings.ToUpper(p.curToken.Literal) == "OR") {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseAndExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseAndExpression() (ast.Expression, error) {
+	left, err := p.parseEqualityExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenAnd) || (p.curTokenIs(tokens.TokenIdent) && strings.ToUpper(p.curToken.Literal) == "AND") {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseEqualityExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseEqualityExpression() (ast.Expression, error) {
+	left, err := p.parseRelationalExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenEq) || p.curTokenIs(tokens.TokenNeq) {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseRelationalExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseRelationalExpression() (ast.Expression, error) {
+	left, err := p.parseAdditiveExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenLt) || p.curTokenIs(tokens.TokenGt) || p.curTokenIs(tokens.TokenLte) || p.curTokenIs(tokens.TokenGte) {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseAdditiveExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseAdditiveExpression() (ast.Expression, error) {
+	left, err := p.parseMultiplicativeExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenPlus) || p.curTokenIs(tokens.TokenMinus) {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseMultiplicativeExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseMultiplicativeExpression() (ast.Expression, error) {
+	left, err := p.parseUnaryExpression()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenMultiply) || p.curTokenIs(tokens.TokenDivide) {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		right, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &expressions.BinaryExpr{
+			Left:     left,
+			Operator: operator.Type,
+			Right:    right,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}
+	}
+	return left, nil
+}
+
+func (p *Parser) parseUnaryExpression() (ast.Expression, error) {
+	if p.curTokenIs(tokens.TokenNot) || p.curTokenIs(tokens.TokenMinus) {
+		operator := p.curToken
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		expr, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &expressions.UnaryExpr{
+			Operator: operator.Type,
+			Expr:     expr,
+			Line:     operator.Line,
+			Column:   operator.Column,
+		}, nil
+	}
+	return p.parseMemberAccessExpression()
+}
+
+func (p *Parser) parseMemberAccessExpression() (ast.Expression, error) {
+	expr, err := p.parsePrimaryExpressionInner()
+	if err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenDot) || p.curTokenIs(tokens.TokenLeftBracket) || p.curTokenIs(tokens.TokenQuestionDot) || p.curTokenIs(tokens.TokenQuestionBracket) {
+		var part expressions.MemberPart
+		if p.curTokenIs(tokens.TokenDot) || p.curTokenIs(tokens.TokenQuestionDot) {
+			optional := p.curTokenIs(tokens.TokenQuestionDot)
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+			if !p.curTokenIs(tokens.TokenIdent) && p.curToken.Type != tokens.TokenString {
+				return nil, errors.NewSyntaxError(fmt.Sprintf("Expected identifier after dot at line %d, column %d", p.curToken.Line, p.curToken.Column), p.curToken.Line, p.curToken.Column)
+			}
+			part = expressions.MemberPart{Optional: optional, IsIndex: false, Key: strings.TrimSpace(p.curToken.Literal), Line: p.curToken.Line, Column: p.curToken.Column}
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+		} else {
+			optional := p.curTokenIs(tokens.TokenQuestionBracket)
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+			exprTmp, err := p.ParseExpression()
+			if err != nil {
+				return nil, err
+			}
+			indexExpr := exprTmp
+			if !p.curTokenIs(tokens.TokenRightBracket) {
+				return nil, errors.NewSyntaxError(fmt.Sprintf("Expected closing bracket at line %d, column %d", p.curToken.Line, p.curToken.Column), p.curToken.Line, p.curToken.Column)
+			}
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+			part = expressions.MemberPart{Optional: optional, IsIndex: true, Expr: indexExpr, Line: p.curToken.Line, Column: p.curToken.Column}
+		}
+		if mae, ok := expr.(*expressions.MemberAccessExpr); ok {
+			mae.AccessParts = append(mae.AccessParts, part)
+		} else {
+			expr = &expressions.MemberAccessExpr{Target: expr, AccessParts: []expressions.MemberPart{part}}
+		}
+	}
+	return expr, nil
+}
+
+func (p *Parser) parsePrimaryExpressionInner() (ast.Expression, error) {
+	switch p.curToken.Type {
+	case tokens.TokenLparen:
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		expr, err := p.ParseExpression()
+		if err != nil {
+			return nil, err
+		}
+		if !p.curTokenIs(tokens.TokenRparen) {
+			return nil, errors.NewSyntaxError("Expected RPAREN", p.curToken.Line, p.curToken.Column)
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return expr, nil
+
+	case tokens.TokenNumber:
+		lit := &expressions.LiteralExpr{
+			Value:  types.ParseNumber(p.curToken.Literal),
+			Line:   p.curToken.Line,
+			Column: p.curToken.Column,
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return lit, nil
+
+	case tokens.TokenString:
+		lit := &expressions.LiteralExpr{
+			Value:  p.curToken.Literal,
+			Line:   p.curToken.Line,
+			Column: p.curToken.Column,
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return lit, nil
+
+	case tokens.TokenBool:
+		var val bool
+		if p.curToken.Literal == "true" {
+			val = true
+		} else {
+			val = false
+		}
+		lit := &expressions.LiteralExpr{
+			Value:  val,
+			Line:   p.curToken.Line,
+			Column: p.curToken.Column,
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return lit, nil
+
+	case tokens.TokenNull:
+		lit := &expressions.LiteralExpr{
+			Value:  nil,
+			Line:   p.curToken.Line,
+			Column: p.curToken.Column,
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return lit, nil
+
+	case tokens.TokenDollar:
+		return p.parseContextExpression()
+	case tokens.TokenLeftCurly:
+		return p.parseObjectLiteral()
+	case tokens.TokenLeftBracket:
+		return p.parseArrayLiteral()
+	case tokens.TokenIdent:
+		if p.peekTokenIs(tokens.TokenLparen) || p.peekTokenIs(tokens.TokenDot) {
+			return p.parseFunctionCall()
+		}
+		return nil, errors.NewSyntaxError(fmt.Sprintf("Bare identifier '%s' is not allowed outside of context references or object keys", p.curToken.Literal), p.curToken.Line, p.curToken.Column)
+	default:
+		return nil, errors.NewSyntaxError(fmt.Sprintf("Unexpected token %s", p.curToken.Literal), p.curToken.Line, p.curToken.Column)
+	}
+}
+
+func (p *Parser) parseContextExpression() (ast.Expression, error) {
+	startToken := p.curToken
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	if p.curTokenIs(tokens.TokenIdent) {
+		ident := &expressions.IdentifierExpr{
+			Name:   p.curToken.Literal,
+			Line:   p.curToken.Line,
+			Column: p.curToken.Column,
+		}
+		ce := &expressions.ContextExpr{
+			Ident:  ident,
+			Line:   startToken.Line,
+			Column: startToken.Column,
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return ce, nil
+	} else if p.curTokenIs(tokens.TokenLeftBracket) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		expr, err := p.ParseExpression()
+		if err != nil {
+			return nil, err
+		}
+		if !p.curTokenIs(tokens.TokenRightBracket) {
+			return nil, errors.NewSyntaxError("Expected RBRACKET in context expression", p.curToken.Line, p.curToken.Column)
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		ce := &expressions.ContextExpr{
+			Ident:     nil,
+			Subscript: expr,
+			Line:      startToken.Line,
+			Column:    startToken.Column,
+		}
+		return ce, nil
+	} else {
+		ce := &expressions.ContextExpr{
+			Ident:     nil,
+			Subscript: nil,
+			Line:      startToken.Line,
+			Column:    startToken.Column,
+		}
+		return ce, nil
+	}
+}
+
+func (p *Parser) parseFunctionCall() (ast.Expression, error) {
+	var parts []string
+	parts = append(parts, p.curToken.Literal)
+	startToken := p.curToken
+
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	for p.curTokenIs(tokens.TokenDot) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		if !p.curTokenIs(tokens.TokenIdent) {
+			return nil, errors.NewSyntaxError("Expected identifier after dot in function call", p.curToken.Line, p.curToken.Column)
+		}
+		parts = append(parts, p.curToken.Literal)
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+	}
+	if !p.curTokenIs(tokens.TokenLparen) {
+		return nil, errors.NewSyntaxError("Expected '(' in function call", p.curToken.Line, p.curToken.Column)
+	}
+	parenToken := p.curToken
+
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+
+	var args []ast.Expression
+	if !p.curTokenIs(tokens.TokenRparen) {
+		arg, err := p.ParseExpression()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, arg)
+		for p.curTokenIs(tokens.TokenComma) {
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+			arg, err := p.ParseExpression()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+		}
+		if !p.curTokenIs(tokens.TokenRparen) {
+			return nil, errors.NewSyntaxError("Expected ')' after arguments in function call", p.curToken.Line, p.curToken.Column)
+		}
+	}
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	return &expressions.FunctionCallExpr{
+		Namespace:   parts,
+		Args:        args,
+		Line:        startToken.Line,
+		Column:      startToken.Column,
+		ParenLine:   parenToken.Line,
+		ParenColumn: parenToken.Column,
+	}, nil
+}
+
+func (p *Parser) parseArrayLiteral() (ast.Expression, error) {
+	startToken := p.curToken
+	var elements []ast.Expression
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	if p.curTokenIs(tokens.TokenRightBracket) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return &expressions.ArrayLiteralExpr{
+			Elements: elements,
+			Line:     startToken.Line,
+			Column:   startToken.Column,
+		}, nil
+	}
+	expr, err := p.ParseExpression()
+	if err != nil {
+		return nil, err
+	}
+	elements = append(elements, expr)
+	for p.curTokenIs(tokens.TokenComma) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		expr, err := p.ParseExpression()
+		if err != nil {
+			return nil, err
+		}
+		elements = append(elements, expr)
+	}
+	if !p.curTokenIs(tokens.TokenRightBracket) {
+		return nil, errors.NewSyntaxError("Expected ']' at end of array literal", p.curToken.Line, p.curToken.Column)
+	}
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	return &expressions.ArrayLiteralExpr{
+		Elements: elements,
+		Line:     startToken.Line,
+		Column:   startToken.Column,
+	}, nil
+}
+
+func (p *Parser) parseObjectLiteral() (ast.Expression, error) {
+	startToken := p.curToken
+	fields := make(map[string]ast.Expression)
+
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+
+	if p.curTokenIs(tokens.TokenRightCurly) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return &expressions.ObjectLiteralExpr{
+			Fields: fields,
+			Line:   startToken.Line,
+			Column: startToken.Column,
+		}, nil
+	}
+
+	for {
+		var key string
+		if p.curTokenIs(tokens.TokenIdent) || p.curTokenIs(tokens.TokenString) {
+			key = strings.TrimSpace(p.curToken.Literal)
+		} else {
+			return nil, errors.NewSyntaxError("Expected identifier or string as object key", p.curToken.Line, p.curToken.Column)
+		}
+
+		// Check for duplicate key.
+		if _, exists := fields[key]; exists {
+			return nil, errors.NewSemanticError(fmt.Sprintf("Duplicate key '%s' detected", key), p.curToken.Line, p.curToken.Column)
+		}
+
+		if !p.peekTokenIs(tokens.TokenColon) {
+			return nil, errors.NewSyntaxError("Expected ':' after object key", p.peekToken.Line, p.peekToken.Column)
+		}
+
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+
+		valueExpr, err := p.ParseExpression()
+		if err != nil {
+			return nil, err
+		}
+		fields[key] = valueExpr
+
+		if p.curTokenIs(tokens.TokenComma) {
+			// Detect trailing comma.
+			if p.peekTokenIs(tokens.TokenRightCurly) {
+				return nil, errors.NewSyntaxError("Trailing comma not allowed in object literal", p.peekToken.Line, p.peekToken.Column)
+			}
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+		} else if p.curTokenIs(tokens.TokenRightCurly) {
+			break
+		} else {
+			return nil, errors.NewSyntaxError("Expected ',' or '}' after object field", p.curToken.Line, p.curToken.Column)
+		}
+	}
+
+	if !p.curTokenIs(tokens.TokenRightCurly) {
+		return nil, errors.NewSyntaxError("Expected '}' at end of object literal", p.curToken.Line, p.curToken.Column)
+	}
+
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+
+	return &expressions.ObjectLiteralExpr{
+		Fields: fields,
+		Line:   startToken.Line,
+		Column: startToken.Column,
+	}, nil
+}
+
+func (p *Parser) curTokenIs(t tokens.TokenType) bool {
+	return p.curToken.Type == t
+}
+
+func (p *Parser) peekTokenIs(t tokens.TokenType) bool {
+	return p.peekToken.Type == t
+}
+// --------- FILE END: "pkg/parser/parser.go" ----------
+// --------- FILE START: "pkg/signing/signing.go" (size: 2321 bytes, modtime: 2025-02-18T22:40:48-05:00) ----------
+package signing
+
+import (
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// LoadPrivateKey reads a PEM file and parses it as an RSA private key.
+func LoadPrivateKey(filename string) (*rsa.PrivateKey, error) {
+	// Clean and validate the filename.
+	cleanFilename := filepath.Clean(filename)
+	if !strings.HasSuffix(cleanFilename, ".pem") {
+		return nil, fmt.Errorf("invalid private key file: expected a .pem file")
+	}
+
+	data, err := os.ReadFile(cleanFilename)
+	if err != nil {
+		return nil, fmt.Errorf("error reading %s: %v", cleanFilename, err)
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "RSA PRIVATE KEY" {
+		return nil, fmt.Errorf("failed to decode PEM block containing RSA private key")
+	}
+	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing RSA private key: %v", err)
+	}
+	return privKey, nil
+}
+
+// LoadPublicKey reads a PEM file and returns an RSA public key.
+func LoadPublicKey(filename string) (*rsa.PublicKey, error) {
+	// Clean and validate the filename.
+	cleanFilename := filepath.Clean(filename)
+	if !strings.HasSuffix(cleanFilename, ".pem") {
+		return nil, fmt.Errorf("invalid public key file: expected a .pem file")
+	}
+
+	data, err := os.ReadFile(cleanFilename)
+	if err != nil {
+		return nil, fmt.Errorf("error reading %s: %v", cleanFilename, err)
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing public key")
+	}
+	switch block.Type {
+	case "RSA PUBLIC KEY":
+		pub, err := x509.ParsePKCS1PublicKey(block.Bytes)
+		if err == nil {
+			return pub, nil
+		}
+		// If parsing as PKCS1 fails, try PKIX.
+		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing RSA public key: %v", err)
+		}
+		rsaPub, ok := key.(*rsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("not an RSA public key")
+		}
+		return rsaPub, nil
+	case "PUBLIC KEY":
+		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing public key: %v", err)
+		}
+		rsaPub, ok := key.(*rsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("not an RSA public key")
+		}
+		return rsaPub, nil
+	default:
+		return nil, fmt.Errorf("unsupported key type %q", block.Type)
+	}
+}
+// --------- FILE END: "pkg/signing/signing.go" ----------
+// --------- FILE START: "pkg/testing/testing.go" (size: 8751 bytes, modtime: 2025-02-21T20:41:20-05:00) ----------
+package testing
+
+import (
+	stdErrors "errors"
+	"fmt"
+	astClass "github.com/SpecDrivenDesign/lql/pkg/ast/expressions"
+	"github.com/SpecDrivenDesign/lql/pkg/env"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/lexer"
+	"github.com/SpecDrivenDesign/lql/pkg/parser"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
+	"math"
+	"strings"
+	"time"
+)
+
+// TestCase represents a DSL test case.
+type TestCase struct {
+	Description          string                 `yaml:"description"`
+	Context              map[string]interface{} `yaml:"context"`
+	Expression           string                 `yaml:"expression"`
+	ExpectedError        string                 `yaml:"expectedError"`
+	ExpectedErrorMessage string                 `yaml:"expectedErrorMessage"`
+	ExpectedResult       interface{}            `yaml:"expectedResult"`
+	Skip                 bool                   `yaml:"skip"`
+	Focus                bool                   `yaml:"focus"`
+}
+
+// TestResult represents the result of executing a test case.
+type TestResult struct {
+	TestID               int                    `yaml:"testId"`
+	Description          string                 `yaml:"description"`
+	Expression           string                 `yaml:"expression"`
+	Context              map[string]interface{} `yaml:"context"`
+	ExpectedResult       interface{}            `yaml:"expectedResult,omitempty"`
+	ExpectedError        string                 `yaml:"expectedError,omitempty"`
+	ExpectedErrorMessage string                 `yaml:"expectedErrorMessage,omitempty"`
+	ActualResult         interface{}            `yaml:"actualResult,omitempty"`
+	ActualError          error                  `yaml:"actualError,omitempty"`
+	Status               string                 `yaml:"status"`
+	ErrLine              int                    `yaml:"errorLine,omitempty"`
+	ErrColumn            int                    `yaml:"errorColumn,omitempty"`
+	ErrorContext         string                 `yaml:"errorSnippet,omitempty"`
+	BenchmarkTime        string                 `yaml:"benchmarkTime,omitempty"`
+	BenchmarkOpsSec      float64                `yaml:"benchmarkOpsSec,omitempty"`
+}
+
+// TestSuiteResult aggregates the results of a test suite.
+type TestSuiteResult struct {
+	Passed      int          `yaml:"passed"`
+	Failed      int          `yaml:"failed"`
+	Skipped     int          `yaml:"skipped"`
+	Total       int          `yaml:"total"`
+	TestResults []TestResult `yaml:"test_results"`
+}
+
+// RunTests processes test cases and returns a suite result.
+
+func RunTests(testCases []TestCase, env *env.Environment, failFast bool, benchmark bool) TestSuiteResult {
+	suiteResult := TestSuiteResult{
+		TestResults: []TestResult{},
+	}
+	// Determine if any test is marked as focused.
+	focusMode := false
+	for _, tc := range testCases {
+		if tc.Focus {
+			focusMode = true
+			break
+		}
+	}
+
+	// Process each test case.
+	for i, tc := range testCases {
+		testID := i + 1
+		result := TestResult{
+			TestID:               testID,
+			Description:          tc.Description,
+			Expression:           tc.Expression,
+			Context:              tc.Context,
+			ExpectedResult:       tc.ExpectedResult,
+			ExpectedError:        tc.ExpectedError,
+			ExpectedErrorMessage: tc.ExpectedErrorMessage,
+		}
+
+		// Skip tests that are not focused when focus mode is active.
+		if focusMode && !tc.Focus {
+			result.Status = "SKIPPED"
+			suiteResult.Skipped++
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+
+		// Skip tests explicitly marked as skipped.
+		if tc.Skip {
+			result.Status = "SKIPPED"
+			suiteResult.Skipped++
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+
+		// Only count tests that actually run.
+		suiteResult.Total++
+
+		// Parse the expression.
+		lexer := lexer.NewLexer(tc.Expression)
+		parser, err := parser.NewParser(lexer)
+		if err != nil {
+			var errorWithDetail errors.PositionalError
+			hasErrorWithDetail := stdErrors.As(err, &errorWithDetail)
+
+			errMsg := err.Error()
+			result.ActualError = err
+			errLine, errColumn := errors.GetErrorPosition(err)
+			result.ErrLine = errLine
+			result.ErrColumn = errColumn
+			result.ErrorContext = errors.GetErrorContext(tc.Expression, errLine, errColumn, false)
+			if (hasErrorWithDetail && tc.ExpectedError == errorWithDetail.Kind()) && strings.Contains(errMsg, tc.ExpectedErrorMessage) {
+				result.Status = "PASSED"
+				suiteResult.Passed++
+			} else {
+				result.Status = "FAILED"
+				suiteResult.Failed++
+				if failFast {
+					suiteResult.TestResults = append(suiteResult.TestResults, result)
+					break
+				}
+			}
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+
+		ast, parseErr := parser.ParseExpression()
+		if parseErr != nil {
+			var errorWithDetail errors.PositionalError
+			hasErrorWithDetail := stdErrors.As(parseErr, &errorWithDetail)
+			errMsg := parseErr.Error()
+			result.ActualError = parseErr
+			errLine, errColumn := errors.GetErrorPosition(parseErr)
+			result.ErrLine = errLine
+			result.ErrColumn = errColumn
+			result.ErrorContext = errors.GetErrorContext(tc.Expression, errLine, errColumn, false)
+			if (hasErrorWithDetail && tc.ExpectedError == errorWithDetail.Kind()) && strings.Contains(errMsg, tc.ExpectedErrorMessage) {
+				result.Status = "PASSED"
+				suiteResult.Passed++
+			} else {
+				result.Status = "FAILED"
+				suiteResult.Failed++
+				if failFast {
+					suiteResult.TestResults = append(suiteResult.TestResults, result)
+					break
+				}
+			}
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+		result.Expression = ast.String()
+
+		// Evaluate the AST.
+		evalResult, evalErr := ast.Eval(tc.Context, env)
+		if evalErr != nil {
+			var errorWithDetail errors.PositionalError
+			hasErrorWithDetail := stdErrors.As(evalErr, &errorWithDetail)
+			errMsg := evalErr.Error()
+			result.ActualError = evalErr
+			errLine, errColumn := errors.GetErrorPosition(evalErr)
+			result.ErrLine = errLine
+			result.ErrColumn = errColumn
+			result.ErrorContext = errors.GetErrorContext(tc.Expression, errLine, errColumn, false)
+			if (hasErrorWithDetail && tc.ExpectedError == errorWithDetail.Kind()) && strings.Contains(errMsg, tc.ExpectedErrorMessage) {
+				result.Status = "PASSED"
+				suiteResult.Passed++
+			} else {
+				result.Status = "FAILED"
+				suiteResult.Failed++
+				if failFast {
+					suiteResult.TestResults = append(suiteResult.TestResults, result)
+					break
+				}
+			}
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+
+		// If an error was expected but evaluation produced a result.
+		if tc.ExpectedError != "" {
+			result.ActualResult = evalResult
+			result.Status = "FAILED"
+			suiteResult.Failed++
+			if failFast {
+				suiteResult.TestResults = append(suiteResult.TestResults, result)
+				break
+			}
+			suiteResult.TestResults = append(suiteResult.TestResults, result)
+			continue
+		}
+
+		// Compare the actual result with the expected result.
+		result.ActualResult = evalResult
+		var passTest bool
+		if rVal, ok := types.ToFloat(evalResult); ok {
+			if eVal, ok2 := types.ToFloat(tc.ExpectedResult); ok2 {
+				passTest = math.Abs(rVal-eVal) < 1e-9
+			} else {
+				passTest = fmt.Sprintf("%v", evalResult) == fmt.Sprintf("%v", tc.ExpectedResult)
+			}
+		} else {
+			var resultStr, expectedStr string
+			if resStr, ok := evalResult.(string); ok {
+				resultStr = strings.ReplaceAll(resStr, "\n", "\\n")
+			} else {
+				resultStr = fmt.Sprintf("%v", evalResult)
+			}
+			if expStr, ok := tc.ExpectedResult.(string); ok {
+				expectedStr = strings.ReplaceAll(expStr, "\n", "\\n")
+			} else {
+				expectedStr = fmt.Sprintf("%v", tc.ExpectedResult)
+			}
+			passTest = resultStr == expectedStr
+		}
+
+		if passTest {
+			result.Status = "PASSED"
+			suiteResult.Passed++
+		} else {
+			result.Status = "FAILED"
+			suiteResult.Failed++
+			if failFast {
+				suiteResult.TestResults = append(suiteResult.TestResults, result)
+				break
+			}
+		}
+
+		// --- BENCHMARKING ---
+		// Only run benchmark if the flag is enabled,
+		// the test passed and no error was expected.
+		// And only benchmark if the top-level AST is a FunctionCallExpr.
+		if benchmark && result.Status == "PASSED" && tc.ExpectedError == "" {
+			if _, isFuncCall := ast.(*astClass.FunctionCallExpr); isFuncCall {
+				iterations := 1000
+				start := time.Now()
+				for j := 0; j < iterations; j++ {
+					// We ignore errors here since the single-run was already successful.
+					_, _ = ast.Eval(tc.Context, env)
+				}
+				elapsed := time.Since(start)
+				result.BenchmarkTime = elapsed.String()
+				result.BenchmarkOpsSec = float64(iterations) / elapsed.Seconds()
+			}
+		}
+		// --- end benchmark ---
+
+		suiteResult.TestResults = append(suiteResult.TestResults, result)
+	}
+	return suiteResult
+}
+// --------- FILE END: "pkg/testing/testing.go" ----------
