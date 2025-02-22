@@ -2,9 +2,9 @@ package libraries
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
-	"github.com/RyanCopley/expression-parser/pkg/param"
-	"github.com/RyanCopley/expression-parser/pkg/types"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/param"
+	"github.com/SpecDrivenDesign/lql/pkg/types"
 	"sort"
 )
 

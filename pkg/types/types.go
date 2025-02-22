@@ -2,7 +2,7 @@ package types
 
 import (
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
 	"math"
 	"strconv"
 	"strings"

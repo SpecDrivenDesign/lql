@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
 )
 
 // ByteCodeReader reads tokens from a binary-encoded byte slice.

@@ -8,11 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"github.com/RyanCopley/expression-parser/pkg/tokens"
+	"github.com/SpecDrivenDesign/lql/pkg/tokens"
 	"strconv"
 	"strings"
 
-	"github.com/RyanCopley/expression-parser/pkg/errors"
+	"github.com/SpecDrivenDesign/lql/pkg/errors"
 )
 
 // isHexDigit returns true if ch is a valid hexadecimal digit.

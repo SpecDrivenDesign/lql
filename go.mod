@@ -1,4 +1,4 @@
-module github.com/RyanCopley/expression-parser
+module github.com/SpecDrivenDesign/lql
 
 go 1.24
 
