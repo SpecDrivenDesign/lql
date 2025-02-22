@@ -1526,36 +1526,30 @@ Test Suite Completed in 0.045 seconds
 
 ## 12. Error Messages Overview
 
-Errors produced by the DSL **MUST** be categorized as follows:
-- **Lexical Errors**
-- **Parse Errors**
-- **Semantic Errors**
-- **Runtime Errors**
-- **Library‑specific Errors**
-
-Every error message **MUST** include the error type, a descriptive message, the line and column numbers, and a code snippet indicating the location of the error.
+All DSL errors MUST include:
+- **errorType:** (LexicalError, SyntaxError, SemanticError, RuntimeError, or Library‑specific errors)
+- **message:** A descriptive error message.
+- **line/column:** The source location.
+- **snippet:** The source line with a caret (^) pointing to the error.
 
 ### 12.1 Lexical Errors
-
-#### Unclosed String Literal
-- **When:** A string literal is started but not terminated.
-- **Example:**
+- **Unclosed String Literal:**  
+  *Example:*
   ```dsl
   $name == "Alice
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   Unclosed string literal
-  ```
-  **Clarification:** This MUST always be reported as a lexical error, not reclassified as syntax.
+  ```  
+  (Always reported as a lexical error.)
 
-#### Malformed Numeric Literal
-- **When:** A numeric literal is malformed (e.g., contains multiple decimal points).
-- **Example:**
+- **Malformed Numeric Literal:**  
+  *Example:*
   ```dsl
   $value == 12..3
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   Malformed numeric literal
   ```
@@ -1563,27 +1557,24 @@ Every error message **MUST** include the error type, a descriptive message, the 
 ---
 
 ### 12.2 Parse Errors
-
-#### Expected Next Token
-- **When:** The parser expects a specific token (such as a closing parenthesis) but encounters something else.
-- **Example:**
+- **Expected Next Token:**  
+  *Example:*
   ```dsl
   ($a + $b
-  ```
-- **Error Output (example):**
+  ```  
+  *Output:*
   ```
   ParseError at line 1, column 8: expected RPAREN but found EOF
   ($a + $b
          ^
   ```
 
-#### Expected Closing Bracket or Parenthesis
-- **When:** An array or parenthesized expression is not properly closed.
-- **Example:**
+- **Expected Closing Bracket/Parenthesis:**  
+  *Example:*
   ```dsl
   [1, 2, 3
-  ```
-- **Error Output (example):**
+  ```  
+  *Output:*
   ```
   ParseError at line 1, column 8: expected ']' after array literal
   [1, 2, 3
@@ -1593,58 +1584,52 @@ Every error message **MUST** include the error type, a descriptive message, the 
 ---
 
 ### 12.3 Semantic Errors
-
-#### Arithmetic Operator on Non‑numeric
-- **When:** An arithmetic operator (e.g., `+`) is applied to a non‑numeric operand.
-- **Example:**
+- **Arithmetic on Non‑Numeric:**  
+  *Example:*
   ```dsl
   $a + $b   // where $a is "hello"
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   SemanticError at line 1, column 4: '+' operator used on non‑numeric type
   ```
 
-#### Relational Operator on Unsupported Types
-- **When:** Using relational operators (e.g., `<`) on booleans.
-- **Example:**
+- **Relational on Unsupported Types:**  
+  *Example:*
   ```dsl
   $flag < true
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   SemanticError at line 1, column 7: '<' operator not allowed on boolean type
   ```
 
-#### NOT Operator on Non‑boolean
-- **When:** The `NOT` operator is applied to a non‑boolean expression.
-- **Example:**
+- **NOT on Non‑Boolean:**  
+  *Example:*
   ```dsl
   NOT 5
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   SemanticError at line 1, column 1: NOT operator requires a boolean operand
   ```
 
-#### Unary Minus on Non‑numeric
-- **When:** The unary minus operator is applied to an expression that does not evaluate to a numeric type.
-- **Example:**
+- **Unary Minus on Non‑Numeric:**  
+  *Example:*
   ```dsl
   -("hello")
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   SemanticError at line 1, column 1: unary '-' operator requires a numeric operand
   ```
 
-#### Bare Identifier Not Allowed
-- **When:** A bare identifier (without a `$` prefix or part of a valid context) is used.
-- **Example:**
+- **Bare Identifier Not Allowed:**  
+  *Example:*
   ```dsl
   username
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   SyntaxError: Bare identifier 'username' is not allowed outside of context references or object keys at line 1, column 1
   ```
@@ -1652,66 +1637,60 @@ Every error message **MUST** include the error type, a descriptive message, the 
 ---
 
 ### 12.4 Runtime Errors
-
-#### Division by Zero
-- **When:** An expression attempts to divide by zero.
-- **Example:**
+- **Division by Zero:**  
+  *Example:*
   ```dsl
   $a / $b   // where $b == 0
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: division by zero at line 1, column 4
   ```
 
-#### Field Not Found
-- **When:** A context reference (e.g., `$user`) is missing.
-- **Example:**
+- **Field Not Found:**  
+  *Example:*
   ```dsl
-  $user.name  // if $user is missing in the context
-  ```
-- **Error Output:**
+  $user.name  // if $user is missing
+  ```  
+  *Output:*
   ```
   RuntimeError: field 'user' not found at line 1, column 1
   ```
 
-#### Attempted Member Access on Null
-- **When:** Accessing a member of a `null` value.
-- **Example:**
+- **Member Access on Null:**  
+  *Example:*
   ```dsl
   $user.name   // when $user is null
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: attempted member access on null at line 1, column 6
   ```
 
-#### Array Index Errors
-- **When:** An array is indexed with an invalid or non‑numeric index.
-- **Example:**
+- **Array Index Errors:**  
+  *Example 1:*
   ```dsl
   $arr['one']
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: array index must be numeric at line 1, column 5
-  ```
-- **Another Example:**
+  ```  
+  *Example 2:*
   ```dsl
   $arr[-1]
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: Invalid array index -1 at line 1, column 7
   ```
 
-#### Dot Access on Non‑object
-- **When:** Using dot notation on a value that is not an object.
-- **Example:**
+- **Dot Access on Non‑Object:**  
+  *Example:*
   ```dsl
   $a.b   // where $a is not an object
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: dot access on non‑object at line 1, column 3
   ```
@@ -1720,385 +1699,224 @@ Every error message **MUST** include the error type, a descriptive message, the 
 
 ### 12.5 Library‑specific Errors
 
-#### Time Library Errors
-
-**time.now() with Arguments**
-- **Example:**
-  ```dsl
-  time.now(1)
-  ```
-- **Error Output:**
+#### Time Library
+- **time.now() with Arguments:**  
+  *Example:* `time.now(1)`  
+  *Output:*
   ```
   RuntimeError: time.now() takes no arguments at line 1, column 10
   ```
 
-**time.parse Errors**
-- **Missing Arguments:**
-  - **Example:**
-    ```dsl
-    time.parse("2025-01-01")
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: time.parse requires at least 2 arguments at line 1, column 1
-    ```
-- **Non‑string Arguments:**
-  - **Example:**
-    ```dsl
-    time.parse(123, 456)
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: time.parse: first two arguments must be strings at line 1, column 1
-    ```
-- **Custom Format Missing Details:**
-  - **Example:**
-    ```dsl
-    time.parse("2025-02-13 10:00:00", "custom")
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: time.parse with 'custom' requires a formatDetails argument at line 1, column 1
-    ```
-- **Unknown Format:**
-  - **Example:**
-    ```dsl
-    time.parse("2025-01-01", "unknown")
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: time.parse: unknown format at line 1, column 1
-    ```
+- **time.parse Errors:**
+    - Missing arguments:
+      ```dsl
+      time.parse("2025-01-01")
+      ```  
+      →
+      ```
+      RuntimeError: time.parse requires at least 2 arguments at line 1, column 1
+      ```
+    - Non‑string arguments:
+      ```dsl
+      time.parse(123, 456)
+      ```  
+      →
+      ```
+      RuntimeError: time.parse: first two arguments must be strings at line 1, column 1
+      ```
+    - Custom format missing details:
+      ```dsl
+      time.parse("2025-02-13 10:00:00", "custom")
+      ```  
+      →
+      ```
+      RuntimeError: time.parse with 'custom' requires a formatDetails argument at line 1, column 1
+      ```
+    - Unknown format:
+      ```dsl
+      time.parse("2025-01-01", "unknown")
+      ```  
+      →
+      ```
+      RuntimeError: time.parse: unknown format at line 1, column 1
+      ```
 
-**time.add/subtract with Wrong Types**
-- **Example:**
+- **Wrong Types for time.add/subtract:**  
+  *Example:*
   ```dsl
   time.add("2025-01-01", 86400000)
-  ```
-- **Error Output:**
+  ```  
+  *Output:*
   ```
   RuntimeError: time.add: first argument must be Time at line 1, column 1
   ```
 
-_(Similar error conditions apply for `time.subtract`, `time.toEpochMillis`, `time.getYear`, `time.startOfDay`, `time.endOfDay`, and `time.withZone`.)_
+_(Similar errors apply for other time functions.)_
 
-#### Math Library Errors
-
-**Wrong Number of Arguments (e.g., math.abs)**
-- **Example:**
-  ```dsl
-  math.abs()
-  ```
-- **Error Output:**
+#### Math Library
+- **Wrong Number of Arguments:**  
+  *Example:* `math.abs()` →
   ```
   RuntimeError: math.abs requires 1 argument at line 1, column 1
   ```
-
-**Non‑numeric Argument**
-- **Example:**
-  ```dsl
-  math.abs("hello")
-  ```
-- **Error Output:**
+- **Non‑numeric Argument:**  
+  *Example:* `math.abs("hello")` →
   ```
   RuntimeError: math.abs: argument must be numeric at line 1, column 1
   ```
+- **Aggregation Errors:**
+    - Non‑array: `math.sum("not an array")` →
+      ```
+      RuntimeError: Aggregation: argument must be an array at line 1, column 1
+      ```
+    - Empty array without default: `array.first([])` →
+      ```
+      RuntimeError: array.first: array is empty at line 1, column 1
+      ```
 
-**Aggregation Errors (e.g., math.sum)**
-- **Argument Not Array:**
-  - **Example:**
-    ```dsl
-    math.sum("not an array")
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: Aggregation: argument must be an array at line 1, column 1
-    ```
-- **Empty Array Without Default:**
-  - **Example:**
-    ```dsl
-    array.first([])
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: array.first: array is empty at line 1, column 1
-    ```
-
-#### String Library Errors
-
-**Too Many Arguments**
-- **Example:**
-  ```dsl
-  string.toLower("HELLO", "extra")
-  ```
-- **Error Output:**
+#### String Library
+- **Too Many Arguments:**  
+  *Example:* `string.toLower("HELLO", "extra")` →
   ```
   RuntimeError: string.toLower requires 1 argument at line 1, column 1
   ```
-
-**Wrong Type**
-- **Example:**
-  ```dsl
-  string.toLower(123)
-  ```
-- **Error Output:**
+- **Wrong Type:**  
+  *Example:* `string.toLower(123)` →
   ```
   RuntimeError: string.toLower: argument must be string at line 1, column 1
   ```
-
-**string.concat: Non‑string Arguments**
-- **Example:**
-  ```dsl
-  string.concat("Hello", 123)
-  ```
-- **Error Output:**
+- **string.concat with Non‑string:**  
+  *Example:* `string.concat("Hello", 123)` →
   ```
   RuntimeError: string.concat: argument must be string at line 1, column 1
   ```
 
-_(Similar error messages apply for `toUpper`, `trim`, `startsWith`, `endsWith`, `contains`, `replace`, `split`, `join`, `substring`, and `indexOf`.)_
+_(Similar errors apply for other string functions.)_
 
-#### Regex Library Errors
-
-**Wrong Number of Arguments**
-- **Example:**
-  ```dsl
-  regex.match('pattern')
-  ```
-- **Error Output:**
+#### Regex Library
+- **Wrong Number of Arguments:**  
+  *Example:* `regex.match('pattern')` →
   ```
   RuntimeError: regex.match requires 2 arguments at line 1, column 1
   ```
-
-**Non‑string Arguments**
-- **Example:**
-  ```dsl
-  regex.match(123, 'abc')
-  ```
-- **Error Output:**
+- **Non‑string Arguments:**  
+  *Example:* `regex.match(123, 'abc')` →
   ```
   RuntimeError: regex.match: arguments must be strings at line 1, column 1
   ```
 
-#### Array Library Errors
-
-**array.contains: Wrong Number or Type of Arguments**
-- **Example:**
-  ```dsl
-  array.contains(123, 1)
-  ```
-- **Error Output:**
+#### Array Library
+- **array.contains:**  
+  *Example:* `array.contains(123, 1)` →
   ```
   RuntimeError: array.contains requires 2 arguments at line 1, column 1
+  ```  
+  *Example:* `array.contains("not an array", 1)` →
   ```
-- **First Argument Not an Array:**
-  - **Example:**
-    ```dsl
-    array.contains("not an array", 1)
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: array.contains: first argument must be an array at line 1, column 1
-    ```
-
-**array.find: Wrong Type**
-- **Example:**
-  ```dsl
-  array.find("not an array", "id", 42)
+  RuntimeError: array.contains: first argument must be an array at line 1, column 1
   ```
-- **Error Output:**
+- **array.find:**  
+  *Example:* `array.find("not an array", "id", 42)` →
   ```
   RuntimeError: array.find: first argument must be an array at line 1, column 1
+  ```  
+  If no match: `array.find([], "id", 42)` →
   ```
-- **No Match Without Default:**
-  - **Example:**
-    ```dsl
-    array.find([], "id", 42)
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: array.find: no match found at line 1, column 1
-    ```
-
-**array.first/last: Empty Array Without Default**
-- **Example:**
-  ```dsl
-  array.first([])
+  RuntimeError: array.find: no match found at line 1, column 1
   ```
-- **Error Output:**
+- **array.first/last on Empty Array:**  
+  *Example:* `array.first([])` →
   ```
   RuntimeError: array.first: array is empty at line 1, column 1
   ```
-
-**array.extract: Invalid Argument or Missing Field**
-- **Example:**
-  ```dsl
-  array.extract("not an array", "field")
-  ```
-- **Error Output:**
+- **array.extract:**  
+  *Example:* `array.extract("not an array", "field")` →
   ```
   RuntimeError: array.extract: argument must be an array at line 1, column 1
+  ```  
+  Missing field: `array.extract([{a:1}], "b")` →
   ```
-- **Missing Field in an Element:**
-  - **Example:**
-    ```dsl
-    array.extract([{a:1}], "b")
-    ```
-  - **Error Output:**
-    ```
-    RuntimeError: array.extract: field 'b' missing in element at line 1, column 1
-    ```
-
-**array.sort: Wrong Type or Mixed Elements**
-- **Example (non‑array):**
-  ```dsl
-  array.sort(123)
+  RuntimeError: array.extract: field 'b' missing in element at line 1, column 1
   ```
-- **Error Output:**
+- **array.sort:**  
+  *Example:* `array.sort(123)` →
   ```
   RuntimeError: array.sort: first argument must be an array at line 1, column 1
-  ```
-- **Example (non‑boolean second argument):**
-  ```dsl
-  array.sort([3,1,2], "asc")
-  ```
-- **Error Output:**
+  ```  
+  *Example:* `array.sort([3,1,2], "asc")` →
   ```
   RuntimeError: array.sort: second argument must be boolean at line 1, column 1
-  ```
-- **Mixed or Non‑comparable Elements:**
-  ```dsl
-  array.sort([1, "two", 3])
-  ```
-- **Error Output:**
+  ```  
+  *Example (mixed types):* `array.sort([1, "two", 3])` →
   ```
   RuntimeError: array.sort: mixed types are not comparable at line 1, column 1
   ```
-
-**array.flatten: Argument Not an Array**
-- **Example:**
-  ```dsl
-  array.flatten("not an array")
-  ```
-- **Error Output:**
+- **array.flatten:**  
+  *Example:* `array.flatten("not an array")` →
   ```
   RuntimeError: array.flatten: argument must be an array at line 1, column 1
   ```
 
-#### Cond Library Errors
-
-**cond.ifExpr: Wrong Number or Type of Arguments**
-- **Example:**
-  ```dsl
-  cond.ifExpr(1, 'yes', 'no')
-  ```
-- **Error Output:**
+#### Cond Library
+- **cond.ifExpr:**  
+  *Example:* `cond.ifExpr(1, 'yes', 'no')` →
   ```
   RuntimeError: cond.ifExpr requires 3 arguments at line 1, column 1
-  ```
-- **Example (first argument not boolean):**
-  ```dsl
-  cond.ifExpr(123, 'yes', 'no')
-  ```
-- **Error Output:**
+  ```  
+  *Example:* `cond.ifExpr(123, 'yes', 'no')` →
   ```
   RuntimeError: cond.ifExpr: first argument must be boolean at line 1, column 1
   ```
-
-**cond.coalesce: All Arguments Null**
-- **Example:**
-  ```dsl
-  cond.coalesce(null, null)
-  ```
-- **Error Output:**
+- **cond.coalesce:**  
+  *Example:* `cond.coalesce(null, null)` →
   ```
   RuntimeError: cond.coalesce: all arguments are null at line 1, column 1
   ```
-
-**cond.isFieldPresent: Wrong Type**
-- **Example:**
-  ```dsl
-  cond.isFieldPresent(123, 'field')
-  ```
-- **Error Output:**
+- **cond.isFieldPresent:**  
+  *Example:* `cond.isFieldPresent(123, 'field')` →
   ```
   RuntimeError: cond.isFieldPresent: first argument must be an object at line 1, column 1
   ```
 
-#### Type Library Errors
-
-**Wrong Number of Arguments**
-- **Example:**
-  ```dsl
-  type.isNumber(1,2)
-  ```
-- **Error Output:**
+#### Type Library
+- **Wrong Number of Arguments:**  
+  *Example:* `type.isNumber(1,2)` →
   ```
   RuntimeError: type.isNumber requires 1 argument at line 1, column 1
   ```
-
-**Unknown Function**
-- **Example:**
-  ```dsl
-  type.unknown(123)
-  ```
-- **Error Output:**
+- **Unknown Function:**  
+  *Example:* `type.unknown(123)` →
   ```
   RuntimeError: unknown type function 'unknown' at line 1, column 1
   ```
 
-_(Similar errors apply to `type.string(x)`, `type.int(x)`, and `type.float(x)` if invoked with an incorrect type or wrong number of arguments.)_
+_(Similar errors apply to `type.string(x)`, `type.int(x)`, and `type.float(x)`.)_
 
 ---
 
 ### 12.6 General Runtime Errors
-
-- **Unknown Binary Operator**  
-  **Example:**
-  ```dsl
-  5 $ 3
-  ```
-  **Error Output:**
+- **Unknown Binary Operator:**  
+  *Example:* `5 $ 3` →
   ```
   RuntimeError: unknown binary operator '$' at line 1, column 3
   ```
-
-- **Unknown Unary Operator**  
-  **Example:**
-  ```dsl
-  @5
-  ```
-  **Error Output:**
+- **Unknown Unary Operator:**  
+  *Example:* `@5` →
   ```
   RuntimeError: unknown unary operator '@' at line 1, column 1
   ```
-
-- **Function Call Missing Namespace**  
-  **Example:**
-  ```dsl
-  (foo)(123)
-  ```
-  **Error Output:**
+- **Function Call Missing Namespace:**  
+  *Example:* `(foo)(123)` →
   ```
   RuntimeError: function call missing namespace at line 1, column 1
   ```
-
-- **Library Not Found**  
-  **Example:**
-  ```dsl
-  nonexistent.func(1)
-  ```
-  **Error Output:**
+- **Library Not Found:**  
+  *Example:* `nonexistent.func(1)` →
   ```
   RuntimeError: library 'nonexistent' not found at line 1, column 1
   ```
-
-- **Unknown Library Function**  
-  **Example:**
-  ```dsl
-  math.unknown(1)
-  ```
-  **Error Output:**
+- **Unknown Library Function:**  
+  *Example:* `math.unknown(1)` →
   ```
   RuntimeError: unknown math function 'unknown' at line 1, column 1
   ```
@@ -2106,18 +1924,10 @@ _(Similar errors apply to `type.string(x)`, `type.int(x)`, and `type.float(x)` i
 ---
 
 ### 12.7 File and YAML Errors
-
 - **Error Reading File:**  
-  If the YAML test file cannot be read:
-  ```
-  Error reading file: open tests.yaml: no such file or directory
-  ```
-
+  E.g., `Error reading file: open tests.yaml: no such file or directory`
 - **Error Parsing YAML:**  
-  If the YAML file is malformed:
-  ```
-  Error parsing YAML: yaml: line 10: did not find expected key
-  ```
+  E.g., `Error parsing YAML: yaml: line 10: did not find expected key`
 
 ---
 
