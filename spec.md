@@ -684,7 +684,7 @@ Functions such as `time.getYear(timeVal)`, `time.getMonth(timeVal)`, etc., **MUS
    - **Potential Errors:**  
      - **Runtime Error** if either `x` or `y` is not numeric.
 
-### 5. `math.round(x)`
+5. **`math.round(x)`**
 - **Signature:** `math.round(numeric)`
 - **Return Type:** numeric
 - **Potential Errors:**
