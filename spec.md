@@ -3534,11 +3534,11 @@ type ObjectField struct {
 ```
 - Changes: added space around `==`, commas; removed extra parentheses spacing; single space after `NOT`.
 
-### 17. Bytecode Serialization Format
+## 17. Bytecode Serialization Format
 
 Implementations **MUST** provide the ability to compile DSL expressions into a compact binary representation (bytecode). This bytecode format is designed for efficient storage, secure transmission, and rapid execution. The following outlines the structure and encoding rules for the bytecode.
 
-#### 17.1. Overall Structure
+### 17.1. Overall Structure
 
 A bytecode file consists of four distinct parts concatenated in order:
 
@@ -3554,7 +3554,7 @@ A bytecode file consists of four distinct parts concatenated in order:
 4. **Optional Signature Block:**  
    If the bytecode is to be signed, an RSA signature is appended after the token stream. This signature is computed over the token stream (excluding the header and length field) using an RSA private key. The signature’s length is fixed by the RSA key size (for example, 256 bytes for a 2048‑bit key).
 
-#### 17.2. Token Encoding
+### 17.2. Token Encoding
 
 Each token in the token stream is encoded using the following rules:
 
@@ -3569,7 +3569,7 @@ Each token in the token stream is encoded using the following rules:
 - **Fixed Literals:**  
   Tokens with fixed textual representations (such as punctuation, operators, boolean literals, and `null`) are encoded solely by their token type code; no additional literal data is appended.
 
-#### 17.3. Optional Signature Block
+### 17.3. Optional Signature Block
 
 For security and integrity verification, the DSL implementation **MAY** support signing of compiled bytecode:
 
