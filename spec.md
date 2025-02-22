@@ -1212,92 +1212,8 @@ The expression `myLib.func(...).field` indicates that the function call is evalu
    ```
 
 ---
-## 9. Error Reporting Format (Updated)
 
-All errors produced by the DSL engine MUST include at least the following fields:
-
-- **errorType:** One of the following (or a library-specific error type):  
-  `LexicalError`, `SyntaxError`, `SemanticError`, `RuntimeError`, `TypeError`, `DivideByZeroError`, `ReferenceError`, `UnknownIdentifierError`, `UnknownOperatorError`, `FunctionCallError`, `ParameterError`, or `ArrayOutOfBoundsError`.
-
-- **message:** A descriptive message explaining the error.
-- **line:** The source line number where the error was detected.
-- **column:** The column number in the source where the error was detected.
-- **snippet:** A snippet of the source code showing the relevant line with an arrow (`^`) under the offending token.
-
-### Format
-
-Each error message MUST be formatted as follows:
-
-```
-<ErrorType>: <message> at line <line>, column <column>
-    <source line>
-    <pointer line with a caret (^) indicating the error location>
-```
-
-For example, a **LexicalError** due to an unclosed string literal should be reported as:
-
-```
-LexicalError: Unclosed string literal at line 1, column 16
-    $user.name == "Alice
-                ^
-```
-
-Similarly, a **SyntaxError** for an expected closing parenthesis might appear as:
-
-```
-SyntaxError: Expected RPAREN at line 1, column 8
-    ($a + $b
-           ^
-```
-
-A **SemanticError** such as applying the '+' operator to non‑numeric types should be reported as:
-
-```
-SemanticError: '+' operator used on non‑numeric type at line 1, column 4
-    $a + "hello"
-         ^
-```
-
-Other error types follow the same pattern. For example:
-
-- **TypeError:**  
-  `TypeError: <description> at line <line>, column <column>`
-
-- **DivideByZeroError:**  
-  `DivideByZeroError: <description> at line <line>, column <column>`
-
-- **ReferenceError:**  
-  `ReferenceError: <description> at line <line>, column <column>`
-
-- **UnknownIdentifierError:**  
-  `UnknownIdentifierError: <description> at line <line>, column <column>`
-
-- **UnknownOperatorError:**  
-  `UnknownOperatorError: <description> at line <line>, column <column>`
-
-- **FunctionCallError:**  
-  `FunctionCallError: <description> at line <line>, column <column>`
-
-- **ParameterError:**  
-  `ParameterError: <description> at line <line>, column <column>`
-
-- **ArrayOutOfBoundsError:**  
-  `ArrayOutOfBoundsError: <description> at line <line>, column <column>`
-
-### Implementation Details
-
-- The engine uses a consistent format by employing Go’s `fmt.Sprintf` with a template such as:  
-  `"<ErrorType>: %s at line %d, column %d"`  
-  where `%s` is replaced by the error message, and `%d` by the line and column numbers.
-  
-- A helper function (`GetErrorContext`) splits the source code into lines and produces a “pointer” line where all characters before the error column are replaced by dashes (`-`), ending with a caret (`^`), for example:
-
-  ```
-      $user.name == "Alice
-                  ^
-  ```
-
-- If ANSI colors are enabled (via environment settings), the snippet and error message parts may be colorized accordingly.
+## 9. Reserved section
 
 ---
 
@@ -1524,181 +1440,257 @@ Test Suite Completed in 0.045 seconds
 
 ---
 
-## 12. Error Reporting Overview
+## 12. Error Reporting
 
-All DSL errors are reported with a uniform format that includes the error type, a descriptive message, the line and column numbers, and a snippet of the source code with a caret (“^”) marking the error location. The errors are grouped into four categories: Lexical, Syntax, Semantic, and Runtime Errors.
+All DSL errors are reported with a consistent format. Every error message includes the following fields:
 
-Each error message follows this template:
+- **errorType:** One of:  
+  `LexicalError`, `SyntaxError`, `SemanticError`, `RuntimeError`, `TypeError`, `DivideByZeroError`, `ReferenceError`, `UnknownIdentifierError`, `UnknownOperatorError`, `FunctionCallError`, `ParameterError`, or `ArrayOutOfBoundsError`.
+
+- **message:** A descriptive explanation.
+- **line:** The source line number where the error was detected.
+- **column:** The column number where the error occurred.
+- **snippet:** The relevant source line with a pointer (a line of dashes ending with a caret “^”) indicating the error location.
+
+### Format Template
+
+Each error is formatted as:
 
 ```
 <ErrorType>: <message> at line <line>, column <column>
     <source line>
-    <pointer line with '^' indicating the error location>
+    <pointer line with '^' marking the error>
 ```
 
-### 12.1 Lexical Errors
+For example, a LexicalError for an unclosed string literal:
 
-- **LexicalError – Unclosed String Literal**  
+```
+LexicalError: Unclosed string literal at line 1, column 16
+    $user.name == "Alice
+               ^
+```
+
+And a SyntaxError for a missing closing parenthesis:
+
+```
+SyntaxError: Expected RPAREN but found EOF at line 1, column 8
+    ($a + $b
+           ^
+```
+
+A SemanticError (e.g. applying '+' to a non‑numeric):
+
+```
+SemanticError: '+' operator used on non‑numeric type at line 1, column 4
+    $a + "hello"
+         ^
+```
+
+Other errors follow the same pattern:
+- **TypeError:**  
+  `TypeError: <description> at line <line>, column <column>`
+- **DivideByZeroError:**  
+  `DivideByZeroError: <description> at line <line>, column <column>`
+- **ReferenceError:**  
+  `ReferenceError: <description> at line <line>, column <column>`
+- **UnknownIdentifierError:**  
+  `UnknownIdentifierError: <description> at line <line>, column <column>`
+- **UnknownOperatorError:**  
+  `UnknownOperatorError: <description> at line <line>, column <column>`
+- **FunctionCallError:**  
+  `FunctionCallError: <description> at line <line>, column <column>`
+- **ParameterError:**  
+  `ParameterError: <description> at line <line>, column <column>`
+- **ArrayOutOfBoundsError:**  
+  `ArrayOutOfBoundsError: <description> at line <line>, column <column>`
+
+### 12.1 Error Categories & Exact Outputs
+
+#### Lexical Errors
+- **Unclosed String Literal**  
   **Example:**
   ```dsl
   $name == "Alice
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   LexicalError: Unclosed string literal at line 1, column 16
       $name == "Alice
                  ^
   ```
 
-- **LexicalError – Malformed Numeric Literal**  
+- **Malformed Numeric Literal**  
   **Example:**
   ```dsl
   $value == 12..3
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   LexicalError: Malformed numeric literal at line 1, column 21
   ```
 
-### 12.2 Syntax Errors
-
-- **SyntaxError – Missing RPAREN**  
+#### Syntax Errors
+- **Missing RPAREN**  
   **Example:**
   ```dsl
   ($a + $b
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SyntaxError: Expected RPAREN but found EOF at line 1, column 8
       ($a + $b
              ^
   ```
 
-- **SyntaxError – Bare Identifier Not Allowed**  
+- **Bare Identifier Not Allowed**  
   **Example:**
   ```dsl
   username
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SyntaxError: Bare identifier 'username' is not allowed outside of context references or object keys at line 1, column 1
   ```
 
-### 12.3 Semantic Errors
-
-- **SemanticError – Arithmetic on Non‑numeric Value**  
+#### Semantic Errors
+- **Arithmetic on Non‑numeric Value**  
   **Example:**
   ```dsl
   $a + "hello"
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SemanticError: '+' operator used on non‑numeric type at line 1, column 4
+      $a + "hello"
+           ^
   ```
 
-- **SemanticError – Relational Operator on Boolean**  
+- **Relational Operator on Boolean**  
   **Example:**
   ```dsl
   $flag < true
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SemanticError: '<' operator not allowed on boolean type at line 1, column 7
+      $flag < true
+            ^
   ```
 
-- **SemanticError – NOT on Non‑boolean Operand**  
+- **NOT on Non‑boolean Operand**  
   **Example:**
   ```dsl
   NOT 5
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SemanticError: NOT operator requires a boolean operand at line 1, column 1
+      NOT 5
+      ^^^
   ```
 
-- **SemanticError – Unary '-' on Non‑numeric**  
+- **Unary '-' on Non‑numeric**  
   **Example:**
   ```dsl
   -("hello")
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   SemanticError: unary '-' operator requires a numeric operand at line 1, column 1
+      -("hello")
+       ^
   ```
 
-### 12.4 Runtime Errors
-
-Runtime errors occur during evaluation or within library functions and include the following types:
-
-- **TypeError** (e.g., when a value isn’t of the expected type)  
+#### Runtime Errors
+(Runtime errors arise during evaluation or within library calls.)
+- **TypeError (Wrong type for function arguments, etc.)**  
   **Example:**
   ```dsl
   math.abs("hello")
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   TypeError: math.abs: argument must be numeric at line 1, column 1
+      math.abs("hello")
+               ^^^^^^^
   ```
 
 - **DivideByZeroError**  
   **Example:**
   ```dsl
-  $a / $b   // with $b == 0
-  ```
-  **Error Output:**
+  $a / $b   // where $b is 0
+  ```  
+  **Output:**
   ```
   DivideByZeroError: division by zero at line 1, column 4
+      $a / $b
+         ^
   ```
 
-- **ReferenceError** (for missing fields)  
+- **ReferenceError (Missing field)**  
   **Example:**
   ```dsl
-  $user.name  // if $user is missing
-  ```
-  **Error Output:**
+  $user.name
+  ```  
+  **Output:**
   ```
   ReferenceError: field 'user' not found at line 1, column 1
+      $user.name
+      ^
   ```
 
 - **UnknownOperatorError**  
   **Example:**
   ```dsl
   5 $ 3
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   UnknownOperatorError: unknown binary operator '$' at line 1, column 3
+      5 $ 3
+        ^
   ```
 
-- **FunctionCallError** (e.g., missing namespace or undefined function)  
+- **FunctionCallError (Missing namespace, unknown function, etc.)**  
   **Example:**
   ```dsl
   (foo)(123)
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   FunctionCallError: function call missing namespace at line 1, column 1
+      (foo)(123)
+      ^
   ```
 
-- **ParameterError** (wrong number or type of function arguments)  
+- **ParameterError (Wrong number or type of arguments)**  
   **Example:**
   ```dsl
   time.now(1)
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   ParameterError: time.now() takes no arguments at line 1, column 10
+      time.now(1)
+              ^
   ```
 
 - **ArrayOutOfBoundsError**  
   **Example:**
   ```dsl
   $arr[-1]
-  ```
-  **Error Output:**
+  ```  
+  **Output:**
   ```
   ArrayOutOfBoundsError: Invalid array index -1 at line 1, column 7
+      $arr[-1]
+           ^
   ```
+
+### 12.2 Implementation Notes
+
+- The engine uses a consistent format (e.g. via Go’s `fmt.Sprintf("<ErrorType>: %s at line %d, column %d", ...)`).
+- ANSI coloring may be applied if enabled via environment settings.
 
 ---
 
