@@ -1522,161 +1522,174 @@ Test Suite Completed in 0.045 seconds
 ==============================================
 ```
 
----
-
-Below is a combined error‐reporting section that merges the compressed overview with a concise list of every unique error type. You can copy and paste this entire section into your spec.
-
----
-
 ## 12. Error Messages Overview
 
-All DSL error messages must include the error type, a descriptive message, the line and column numbers, and a snippet showing the error location (with a caret “^”). The errors are grouped as follows:
+Every error message produced by the DSL includes the error type, a descriptive message, the line and column numbers, and a snippet (with a caret “^”) that pinpoints the error location. Errors are grouped as follows:
 
-- **LexicalError:**  
-  Triggered by the lexer when encountering invalid characters, malformed literals (such as an unclosed string or a numeric literal with multiple decimal points), or invalid escape sequences.
+### 12.1 Lexical Errors
 
-- **SyntaxError:**  
-  Raised during parsing when the token sequence violates grammatical rules (for example, missing closing tokens, misplaced operators, or the use of bare identifiers outside permitted contexts).
+- **LexicalError:** Triggered when the lexer encounters invalid characters, malformed literals, or bad escapes.
+    - **Unclosed String Literal**  
+      **Example:**
+      ```dsl
+      $name == "Alice
+      ```
+      **Error Output:**
+      ```
+      LexicalError: Unclosed string literal at line 1, column 16
+          $name == "Alice
+                     ^
+      ```
+    - **Malformed Numeric Literal**  
+      **Example:**
+      ```dsl
+      $value == 12..3
+      ```
+      **Error Output:**
+      ```
+      LexicalError: Malformed numeric literal at line 1, column 21
+      ```
 
-- **SemanticError:**  
-  Occurs when expressions violate type or operator constraints—for instance, using arithmetic operators on non‑numeric types, applying relational operators to unsupported types, or providing invalid operands for unary operators.
+### 12.2 Syntax Errors
 
-- **Runtime Errors:**  
-  This group includes errors raised during evaluation or by built‑in library functions. They cover cases such as:
-    - **TypeError:** A value does not match the expected type or cannot be converted.
-    - **DivideByZeroError:** An attempt is made to divide by zero.
-    - **ReferenceError:** A required context field or object property is missing.
-    - **UnknownIdentifierError:** A bare identifier is used where not allowed.
-    - **UnknownOperatorError:** An unrecognized operator is encountered.
-    - **FunctionCallError:** There is an error invoking a function (for example, a missing namespace or an undefined function).
-    - **ParameterError:** A function is called with an incorrect number or type of arguments.
-    - **ArrayOutOfBoundsError:** An array is accessed using an invalid (non‑numeric or out‑of‑range) index.
+- **SyntaxError:** Raised during parsing when the token sequence violates grammatical rules.
+    - **Missing RPAREN**  
+      **Example:**
+      ```dsl
+      ($a + $b
+      ```
+      **Error Output:**
+      ```
+      SyntaxError: Expected RPAREN but found EOF at line 1, column 8
+          ($a + $b
+                 ^
+      ```
+    - **Bare Identifier Not Allowed**  
+      **Example:**
+      ```dsl
+      username
+      ```
+      **Error Output:**
+      ```
+      SyntaxError: Bare identifier 'username' is not allowed outside of context references or object keys at line 1, column 1
+      ```
 
-### Error Message Format
+### 12.3 Semantic Errors
 
-Each error is formatted as follows:
+- **SemanticError:** Occur when operators or functions are used with operands of the wrong type.
+    - **Arithmetic on Non‑numeric Value**  
+      **Example:**
+      ```dsl
+      $a + "hello"
+      ```
+      **Error Output:**
+      ```
+      SemanticError: '+' operator used on non‑numeric type at line 1, column 4
+      ```
+    - **Relational Operator on Boolean**  
+      **Example:**
+      ```dsl
+      $flag < true
+      ```
+      **Error Output:**
+      ```
+      SemanticError: '<' operator not allowed on boolean type at line 1, column 7
+      ```
+    - **NOT on Non‑boolean Operand**  
+      **Example:**
+      ```dsl
+      NOT 5
+      ```
+      **Error Output:**
+      ```
+      SemanticError: NOT operator requires a boolean operand at line 1, column 1
+      ```
+    - **Unary '-' on Non‑numeric**  
+      **Example:**
+      ```dsl
+      -("hello")
+      ```
+      **Error Output:**
+      ```
+      SemanticError: unary '-' operator requires a numeric operand at line 1, column 1
+      ```
+
+### 12.4 Runtime Errors
+
+Runtime errors are raised during evaluation or within library functions. They include:
+
+- **TypeError:** When a value cannot be converted to or does not match the expected type.
+    - **Example (math.abs on a string):**
+      ```dsl
+      math.abs("hello")
+      ```
+      **Error Output:**
+      ```
+      TypeError: math.abs: argument must be numeric at line 1, column 1
+      ```
+- **DivideByZeroError:** When an expression attempts to divide by zero.
+    - **Example:**
+      ```dsl
+      $a / $b   // where $b == 0
+      ```
+      **Error Output:**
+      ```
+      DivideByZeroError: division by zero at line 1, column 4
+      ```
+- **ReferenceError:** When a required field or property is missing.
+    - **Example:**
+      ```dsl
+      $user.name  // when $user is missing
+      ```
+      **Error Output:**
+      ```
+      ReferenceError: field 'user' not found at line 1, column 1
+      ```
+- **UnknownOperatorError:** When an unrecognized operator is encountered.
+    - **Example:**
+      ```dsl
+      5 $ 3
+      ```
+      **Error Output:**
+      ```
+      UnknownOperatorError: unknown binary operator '$' at line 1, column 3
+      ```
+- **FunctionCallError:** When there is an error invoking a function (e.g. missing namespace or undefined function).
+    - **Example:**
+      ```dsl
+      (foo)(123)
+      ```
+      **Error Output:**
+      ```
+      FunctionCallError: function call missing namespace at line 1, column 1
+      ```
+- **ParameterError:** When a function is called with the wrong number or type of arguments.
+    - **Example:**
+      ```dsl
+      time.now(1)
+      ```
+      **Error Output:**
+      ```
+      ParameterError: time.now() takes no arguments at line 1, column 10
+      ```
+- **ArrayOutOfBoundsError:** When an array is accessed with an invalid index.
+    - **Example:**
+      ```dsl
+      $arr[-1]
+      ```
+      **Error Output:**
+      ```
+      ArrayOutOfBoundsError: Invalid array index -1 at line 1, column 7
+      ```
+
+---
+
+Each error output is formatted uniformly as follows:
 ```
 <ErrorType>: <message> at line <line>, column <column>
     <source line>
-    <pointer line with a caret (^) indicating error location>
+    <pointer line with '^' marking the error location>
 ```
-*(ANSI color codes may be applied if enabled.)*
-
-### Unique Error Types Summary
-
-- **LexicalError:** Invalid characters, unclosed strings, malformed numbers, or bad escapes.  
-  *Example:*
-  ```dsl
-  $name == "Alice
-  ```  
-  *Output:*
-  ```
-  LexicalError: Unclosed string literal at line 1, column 16
-      $name == "Alice
-                 ^
-  ```
-
-- **SyntaxError:** Structural or grammatical errors (e.g. missing RPAREN or using a bare identifier outside valid contexts).  
-  *Example (Missing RPAREN):*
-  ```dsl
-  ($a + $b
-  ```  
-  *Output:*
-  ```
-  SyntaxError: Expected RPAREN but found EOF at line 1, column 8
-      ($a + $b
-             ^
-  ```
-
-- **SemanticError:** Misuse of operators or type violations (e.g. adding a string to a number, using NOT on a non‑boolean).  
-  *Example:*
-  ```dsl
-  $a + "hello"
-  ```  
-  *Output:*
-  ```
-  SemanticError: '+' operator used on non‑numeric type at line 1, column 4
-  ```
-
-- **TypeError:** Occurs when a value is not convertible to or does not match the expected type.  
-  *Example (in a library function):*
-  ```dsl
-  math.abs("hello")
-  ```  
-  *Output:*
-  ```
-  TypeError: math.abs: argument must be numeric at line 1, column 1
-  ```
-
-- **DivideByZeroError:** Raised when a division operation attempts to divide by zero.  
-  *Example:*
-  ```dsl
-  $a / $b   // where $b == 0
-  ```  
-  *Output:*
-  ```
-  DivideByZeroError: division by zero at line 1, column 4
-  ```
-
-- **ReferenceError:** Triggered when a required field or property is missing.  
-  *Example:*
-  ```dsl
-  $user.name  // if $user is missing
-  ```  
-  *Output:*
-  ```
-  ReferenceError: field 'user' not found at line 1, column 1
-  ```
-
-- **UnknownIdentifierError:** Occurs when a bare identifier is used improperly.  
-  *Example:*
-  ```dsl
-  username
-  ```  
-  *Output:*
-  ```
-  SyntaxError: Bare identifier 'username' is not allowed outside of context references or object keys at line 1, column 1
-  ```
-
-- **UnknownOperatorError:** Raised when an unrecognized operator is encountered.  
-  *Example:*
-  ```dsl
-  5 $ 3
-  ```  
-  *Output:*
-  ```
-  UnknownOperatorError: unknown binary operator '$' at line 1, column 3
-  ```
-
-- **FunctionCallError:** Indicates an error during a function invocation (such as a missing namespace or undefined function).  
-  *Example:*
-  ```dsl
-  (foo)(123)
-  ```  
-  *Output:*
-  ```
-  FunctionCallError: function call missing namespace at line 1, column 1
-  ```
-
-- **ParameterError:** Raised when a function is called with an incorrect number or type of arguments.  
-  *Example:*
-  ```dsl
-  time.now(1)
-  ```  
-  *Output:*
-  ```
-  ParameterError: time.now() takes no arguments at line 1, column 10
-  ```
-
-- **ArrayOutOfBoundsError:** Occurs when an array is accessed with an invalid index.  
-  *Example:*
-  ```dsl
-  $arr[-1]
-  ```  
-  *Output:*
-  ```
-  ArrayOutOfBoundsError: Invalid array index -1 at line 1, column 7
-  ```
 
 ---
 
