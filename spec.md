@@ -1524,107 +1524,111 @@ Test Suite Completed in 0.045 seconds
 
 ---
 
+Below is a combined error‐reporting section that merges the compressed overview with a concise list of every unique error type. You can copy and paste this entire section into your spec.
+
+---
+
 ## 12. Error Messages Overview
 
-All DSL errors MUST include:
-- **errorType:** (LexicalError, SyntaxError, SemanticError, RuntimeError, or Library‑specific errors)
-- **message:** A descriptive error message.
-- **line/column:** The source location.
-- **snippet:** The source line with a caret (^) pointing to the error.
+All DSL error messages must include the error type, a descriptive message, the line and column numbers, and a snippet showing the error location (with a caret “^”). The errors are grouped as follows:
 
-### 12.1 Lexical Errors
-- **Unclosed String Literal:**  
+- **LexicalError:**  
+  Triggered by the lexer when encountering invalid characters, malformed literals (such as an unclosed string or a numeric literal with multiple decimal points), or invalid escape sequences.
+
+- **SyntaxError:**  
+  Raised during parsing when the token sequence violates grammatical rules (for example, missing closing tokens, misplaced operators, or the use of bare identifiers outside permitted contexts).
+
+- **SemanticError:**  
+  Occurs when expressions violate type or operator constraints—for instance, using arithmetic operators on non‑numeric types, applying relational operators to unsupported types, or providing invalid operands for unary operators.
+
+- **Runtime Errors:**  
+  This group includes errors raised during evaluation or by built‑in library functions. They cover cases such as:
+    - **TypeError:** A value does not match the expected type or cannot be converted.
+    - **DivideByZeroError:** An attempt is made to divide by zero.
+    - **ReferenceError:** A required context field or object property is missing.
+    - **UnknownIdentifierError:** A bare identifier is used where not allowed.
+    - **UnknownOperatorError:** An unrecognized operator is encountered.
+    - **FunctionCallError:** There is an error invoking a function (for example, a missing namespace or an undefined function).
+    - **ParameterError:** A function is called with an incorrect number or type of arguments.
+    - **ArrayOutOfBoundsError:** An array is accessed using an invalid (non‑numeric or out‑of‑range) index.
+
+### Error Message Format
+
+Each error is formatted as follows:
+```
+<ErrorType>: <message> at line <line>, column <column>
+    <source line>
+    <pointer line with a caret (^) indicating error location>
+```
+*(ANSI color codes may be applied if enabled.)*
+
+### Unique Error Types Summary
+
+- **LexicalError:** Invalid characters, unclosed strings, malformed numbers, or bad escapes.  
   *Example:*
   ```dsl
   $name == "Alice
   ```  
   *Output:*
   ```
-  Unclosed string literal
-  ```  
-  (Always reported as a lexical error.)
-
-- **Malformed Numeric Literal:**  
-  *Example:*
-  ```dsl
-  $value == 12..3
-  ```  
-  *Output:*
-  ```
-  Malformed numeric literal
+  LexicalError: Unclosed string literal at line 1, column 16
+      $name == "Alice
+                 ^
   ```
 
----
-
-### 12.2 Parse Errors
-- **Expected Next Token:**  
-  *Example:*
+- **SyntaxError:** Structural or grammatical errors (e.g. missing RPAREN or using a bare identifier outside valid contexts).  
+  *Example (Missing RPAREN):*
   ```dsl
   ($a + $b
   ```  
   *Output:*
   ```
-  ParseError at line 1, column 8: expected RPAREN but found EOF
-  ($a + $b
-         ^
+  SyntaxError: Expected RPAREN but found EOF at line 1, column 8
+      ($a + $b
+             ^
   ```
 
-- **Expected Closing Bracket/Parenthesis:**  
+- **SemanticError:** Misuse of operators or type violations (e.g. adding a string to a number, using NOT on a non‑boolean).  
   *Example:*
   ```dsl
-  [1, 2, 3
+  $a + "hello"
   ```  
   *Output:*
   ```
-  ParseError at line 1, column 8: expected ']' after array literal
-  [1, 2, 3
-         ^
+  SemanticError: '+' operator used on non‑numeric type at line 1, column 4
   ```
 
----
-
-### 12.3 Semantic Errors
-- **Arithmetic on Non‑Numeric:**  
-  *Example:*
+- **TypeError:** Occurs when a value is not convertible to or does not match the expected type.  
+  *Example (in a library function):*
   ```dsl
-  $a + $b   // where $a is "hello"
+  math.abs("hello")
   ```  
   *Output:*
   ```
-  SemanticError at line 1, column 4: '+' operator used on non‑numeric type
+  TypeError: math.abs: argument must be numeric at line 1, column 1
   ```
 
-- **Relational on Unsupported Types:**  
+- **DivideByZeroError:** Raised when a division operation attempts to divide by zero.  
   *Example:*
   ```dsl
-  $flag < true
+  $a / $b   // where $b == 0
   ```  
   *Output:*
   ```
-  SemanticError at line 1, column 7: '<' operator not allowed on boolean type
+  DivideByZeroError: division by zero at line 1, column 4
   ```
 
-- **NOT on Non‑Boolean:**  
+- **ReferenceError:** Triggered when a required field or property is missing.  
   *Example:*
   ```dsl
-  NOT 5
+  $user.name  // if $user is missing
   ```  
   *Output:*
   ```
-  SemanticError at line 1, column 1: NOT operator requires a boolean operand
+  ReferenceError: field 'user' not found at line 1, column 1
   ```
 
-- **Unary Minus on Non‑Numeric:**  
-  *Example:*
-  ```dsl
-  -("hello")
-  ```  
-  *Output:*
-  ```
-  SemanticError at line 1, column 1: unary '-' operator requires a numeric operand
-  ```
-
-- **Bare Identifier Not Allowed:**  
+- **UnknownIdentifierError:** Occurs when a bare identifier is used improperly.  
   *Example:*
   ```dsl
   username
@@ -1634,300 +1638,45 @@ All DSL errors MUST include:
   SyntaxError: Bare identifier 'username' is not allowed outside of context references or object keys at line 1, column 1
   ```
 
----
-
-### 12.4 Runtime Errors
-- **Division by Zero:**  
+- **UnknownOperatorError:** Raised when an unrecognized operator is encountered.  
   *Example:*
   ```dsl
-  $a / $b   // where $b == 0
+  5 $ 3
   ```  
   *Output:*
   ```
-  RuntimeError: division by zero at line 1, column 4
+  UnknownOperatorError: unknown binary operator '$' at line 1, column 3
   ```
 
-- **Field Not Found:**  
+- **FunctionCallError:** Indicates an error during a function invocation (such as a missing namespace or undefined function).  
   *Example:*
   ```dsl
-  $user.name  // if $user is missing
+  (foo)(123)
   ```  
   *Output:*
   ```
-  RuntimeError: field 'user' not found at line 1, column 1
+  FunctionCallError: function call missing namespace at line 1, column 1
   ```
 
-- **Member Access on Null:**  
+- **ParameterError:** Raised when a function is called with an incorrect number or type of arguments.  
   *Example:*
   ```dsl
-  $user.name   // when $user is null
+  time.now(1)
   ```  
   *Output:*
   ```
-  RuntimeError: attempted member access on null at line 1, column 6
+  ParameterError: time.now() takes no arguments at line 1, column 10
   ```
 
-- **Array Index Errors:**  
-  *Example 1:*
-  ```dsl
-  $arr['one']
-  ```  
-  *Output:*
-  ```
-  RuntimeError: array index must be numeric at line 1, column 5
-  ```  
-  *Example 2:*
+- **ArrayOutOfBoundsError:** Occurs when an array is accessed with an invalid index.  
+  *Example:*
   ```dsl
   $arr[-1]
   ```  
   *Output:*
   ```
-  RuntimeError: Invalid array index -1 at line 1, column 7
+  ArrayOutOfBoundsError: Invalid array index -1 at line 1, column 7
   ```
-
-- **Dot Access on Non‑Object:**  
-  *Example:*
-  ```dsl
-  $a.b   // where $a is not an object
-  ```  
-  *Output:*
-  ```
-  RuntimeError: dot access on non‑object at line 1, column 3
-  ```
-
----
-
-### 12.5 Library‑specific Errors
-
-#### Time Library
-- **time.now() with Arguments:**  
-  *Example:* `time.now(1)`  
-  *Output:*
-  ```
-  RuntimeError: time.now() takes no arguments at line 1, column 10
-  ```
-
-- **time.parse Errors:**
-    - Missing arguments:
-      ```dsl
-      time.parse("2025-01-01")
-      ```  
-      →
-      ```
-      RuntimeError: time.parse requires at least 2 arguments at line 1, column 1
-      ```
-    - Non‑string arguments:
-      ```dsl
-      time.parse(123, 456)
-      ```  
-      →
-      ```
-      RuntimeError: time.parse: first two arguments must be strings at line 1, column 1
-      ```
-    - Custom format missing details:
-      ```dsl
-      time.parse("2025-02-13 10:00:00", "custom")
-      ```  
-      →
-      ```
-      RuntimeError: time.parse with 'custom' requires a formatDetails argument at line 1, column 1
-      ```
-    - Unknown format:
-      ```dsl
-      time.parse("2025-01-01", "unknown")
-      ```  
-      →
-      ```
-      RuntimeError: time.parse: unknown format at line 1, column 1
-      ```
-
-- **Wrong Types for time.add/subtract:**  
-  *Example:*
-  ```dsl
-  time.add("2025-01-01", 86400000)
-  ```  
-  *Output:*
-  ```
-  RuntimeError: time.add: first argument must be Time at line 1, column 1
-  ```
-
-_(Similar errors apply for other time functions.)_
-
-#### Math Library
-- **Wrong Number of Arguments:**  
-  *Example:* `math.abs()` →
-  ```
-  RuntimeError: math.abs requires 1 argument at line 1, column 1
-  ```
-- **Non‑numeric Argument:**  
-  *Example:* `math.abs("hello")` →
-  ```
-  RuntimeError: math.abs: argument must be numeric at line 1, column 1
-  ```
-- **Aggregation Errors:**
-    - Non‑array: `math.sum("not an array")` →
-      ```
-      RuntimeError: Aggregation: argument must be an array at line 1, column 1
-      ```
-    - Empty array without default: `array.first([])` →
-      ```
-      RuntimeError: array.first: array is empty at line 1, column 1
-      ```
-
-#### String Library
-- **Too Many Arguments:**  
-  *Example:* `string.toLower("HELLO", "extra")` →
-  ```
-  RuntimeError: string.toLower requires 1 argument at line 1, column 1
-  ```
-- **Wrong Type:**  
-  *Example:* `string.toLower(123)` →
-  ```
-  RuntimeError: string.toLower: argument must be string at line 1, column 1
-  ```
-- **string.concat with Non‑string:**  
-  *Example:* `string.concat("Hello", 123)` →
-  ```
-  RuntimeError: string.concat: argument must be string at line 1, column 1
-  ```
-
-_(Similar errors apply for other string functions.)_
-
-#### Regex Library
-- **Wrong Number of Arguments:**  
-  *Example:* `regex.match('pattern')` →
-  ```
-  RuntimeError: regex.match requires 2 arguments at line 1, column 1
-  ```
-- **Non‑string Arguments:**  
-  *Example:* `regex.match(123, 'abc')` →
-  ```
-  RuntimeError: regex.match: arguments must be strings at line 1, column 1
-  ```
-
-#### Array Library
-- **array.contains:**  
-  *Example:* `array.contains(123, 1)` →
-  ```
-  RuntimeError: array.contains requires 2 arguments at line 1, column 1
-  ```  
-  *Example:* `array.contains("not an array", 1)` →
-  ```
-  RuntimeError: array.contains: first argument must be an array at line 1, column 1
-  ```
-- **array.find:**  
-  *Example:* `array.find("not an array", "id", 42)` →
-  ```
-  RuntimeError: array.find: first argument must be an array at line 1, column 1
-  ```  
-  If no match: `array.find([], "id", 42)` →
-  ```
-  RuntimeError: array.find: no match found at line 1, column 1
-  ```
-- **array.first/last on Empty Array:**  
-  *Example:* `array.first([])` →
-  ```
-  RuntimeError: array.first: array is empty at line 1, column 1
-  ```
-- **array.extract:**  
-  *Example:* `array.extract("not an array", "field")` →
-  ```
-  RuntimeError: array.extract: argument must be an array at line 1, column 1
-  ```  
-  Missing field: `array.extract([{a:1}], "b")` →
-  ```
-  RuntimeError: array.extract: field 'b' missing in element at line 1, column 1
-  ```
-- **array.sort:**  
-  *Example:* `array.sort(123)` →
-  ```
-  RuntimeError: array.sort: first argument must be an array at line 1, column 1
-  ```  
-  *Example:* `array.sort([3,1,2], "asc")` →
-  ```
-  RuntimeError: array.sort: second argument must be boolean at line 1, column 1
-  ```  
-  *Example (mixed types):* `array.sort([1, "two", 3])` →
-  ```
-  RuntimeError: array.sort: mixed types are not comparable at line 1, column 1
-  ```
-- **array.flatten:**  
-  *Example:* `array.flatten("not an array")` →
-  ```
-  RuntimeError: array.flatten: argument must be an array at line 1, column 1
-  ```
-
-#### Cond Library
-- **cond.ifExpr:**  
-  *Example:* `cond.ifExpr(1, 'yes', 'no')` →
-  ```
-  RuntimeError: cond.ifExpr requires 3 arguments at line 1, column 1
-  ```  
-  *Example:* `cond.ifExpr(123, 'yes', 'no')` →
-  ```
-  RuntimeError: cond.ifExpr: first argument must be boolean at line 1, column 1
-  ```
-- **cond.coalesce:**  
-  *Example:* `cond.coalesce(null, null)` →
-  ```
-  RuntimeError: cond.coalesce: all arguments are null at line 1, column 1
-  ```
-- **cond.isFieldPresent:**  
-  *Example:* `cond.isFieldPresent(123, 'field')` →
-  ```
-  RuntimeError: cond.isFieldPresent: first argument must be an object at line 1, column 1
-  ```
-
-#### Type Library
-- **Wrong Number of Arguments:**  
-  *Example:* `type.isNumber(1,2)` →
-  ```
-  RuntimeError: type.isNumber requires 1 argument at line 1, column 1
-  ```
-- **Unknown Function:**  
-  *Example:* `type.unknown(123)` →
-  ```
-  RuntimeError: unknown type function 'unknown' at line 1, column 1
-  ```
-
-_(Similar errors apply to `type.string(x)`, `type.int(x)`, and `type.float(x)`.)_
-
----
-
-### 12.6 General Runtime Errors
-- **Unknown Binary Operator:**  
-  *Example:* `5 $ 3` →
-  ```
-  RuntimeError: unknown binary operator '$' at line 1, column 3
-  ```
-- **Unknown Unary Operator:**  
-  *Example:* `@5` →
-  ```
-  RuntimeError: unknown unary operator '@' at line 1, column 1
-  ```
-- **Function Call Missing Namespace:**  
-  *Example:* `(foo)(123)` →
-  ```
-  RuntimeError: function call missing namespace at line 1, column 1
-  ```
-- **Library Not Found:**  
-  *Example:* `nonexistent.func(1)` →
-  ```
-  RuntimeError: library 'nonexistent' not found at line 1, column 1
-  ```
-- **Unknown Library Function:**  
-  *Example:* `math.unknown(1)` →
-  ```
-  RuntimeError: unknown math function 'unknown' at line 1, column 1
-  ```
-
----
-
-### 12.7 File and YAML Errors
-- **Error Reading File:**  
-  E.g., `Error reading file: open tests.yaml: no such file or directory`
-- **Error Parsing YAML:**  
-  E.g., `Error parsing YAML: yaml: line 10: did not find expected key`
 
 ---
 
