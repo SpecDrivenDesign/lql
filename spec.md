@@ -220,6 +220,7 @@ The DSL tokenizer **MUST** recognize the following token types. Each token type 
 | **EOF**                 | *N/A*                                     | End of input marker.                                                                                 | –                                                                               | `0x00`              |
 | **Illegal**             | Unrecognized characters                   | Represents an unrecognized or illegal token.                                                       | Triggers a lexical error.                                                       | `0x01`              |
 | **Ident**               | `userName`, `item_42`, `城市`              | An identifier consisting of letters, digits, or underscores. **MUST NOT** begin with a digit.         | Lexical error if starting with a digit or containing invalid characters.        | `0x02` (followed by 1‑byte length and literal bytes) |
+| **Dollar**              | `$`                                       | Introduces a context reference.                                                                    | –                                                                               | `0x20`              |
 | **Number**              | `123`, `-45.67`, `+1e10`, `3.14E-2`         | A numeric literal. Integers are those without a decimal point or exponent; others are floats.        | Malformed numeric literals trigger a lexical error.                           | `0x03` (followed by 1‑byte length and literal bytes) |
 | **String**              | `"hello"`, `'world'`                       | A quoted string literal supporting escape sequences.                                               | Unclosed strings trigger a lexical error.                                       | `0x04` (followed by 1‑byte length and literal bytes) |
 | **Bool**                | `true`, `false`                           | Boolean literal (only lowercase allowed).                                                          | Mis‑cased tokens are treated as bare identifiers, triggering a syntax error.      | `0x05` (fixed literal: either “true” or “false”)       |
@@ -249,7 +250,6 @@ The DSL tokenizer **MUST** recognize the following token types. Each token type 
 | **Question**            | `?`                                       | Question mark (used in optional access contexts).                                                 | –                                                                               | `0x1D`              |
 | **QuestionDot**         | `?.`                                      | Optional chaining via dot notation.                                                                | –                                                                               | `0x1E`              |
 | **QuestionBracket**     | `?[`                                      | Optional chaining via bracket notation.                                                            | –                                                                               | `0x1F`              |
-| **Dollar**              | `$`                                       | Introduces a context reference.                                                                    | –                                                                               | `0x20`              |
 
 **Important Note on Bare Identifiers:**  
 Bare usage of an identifier (e.g., `username`) as a standalone expression **without** a `$` prefix, library namespace, or function call context is **disallowed**. Identifiers **MUST** appear either as:
@@ -3534,11 +3534,11 @@ type ObjectField struct {
 ```
 - Changes: added space around `==`, commas; removed extra parentheses spacing; single space after `NOT`.
 
-### 17. Bytecode Serialization Format
+## 17. Bytecode Serialization Format
 
 Implementations **MUST** provide the ability to compile DSL expressions into a compact binary representation (bytecode). This bytecode format is designed for efficient storage, secure transmission, and rapid execution. The following outlines the structure and encoding rules for the bytecode.
 
-#### 17.1. Overall Structure
+### 17.1. Overall Structure
 
 A bytecode file consists of four distinct parts concatenated in order:
 
@@ -3554,7 +3554,7 @@ A bytecode file consists of four distinct parts concatenated in order:
 4. **Optional Signature Block:**  
    If the bytecode is to be signed, an RSA signature is appended after the token stream. This signature is computed over the token stream (excluding the header and length field) using an RSA private key. The signature’s length is fixed by the RSA key size (for example, 256 bytes for a 2048‑bit key).
 
-#### 17.2. Token Encoding
+### 17.2. Token Encoding
 
 Each token in the token stream is encoded using the following rules:
 
@@ -3569,7 +3569,7 @@ Each token in the token stream is encoded using the following rules:
 - **Fixed Literals:**  
   Tokens with fixed textual representations (such as punctuation, operators, boolean literals, and `null`) are encoded solely by their token type code; no additional literal data is appended.
 
-#### 17.3. Optional Signature Block
+### 17.3. Optional Signature Block
 
 For security and integrity verification, the DSL implementation **MAY** support signing of compiled bytecode:
 
