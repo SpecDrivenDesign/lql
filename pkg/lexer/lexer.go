@@ -434,3 +434,29 @@ func (l *Lexer) ExportTokensSigned(priv *rsa.PrivateKey) ([]byte, error) {
 
 	return buf.Bytes(), nil
 }
+
+// ExtractContextIdentifiers iterates through the token stream and returns any context identifiers.
+// It creates a fresh lexer from the input so as not to disturb the original state.
+func (l *Lexer) ExtractContextIdentifiers() ([]string, error) {
+	var identifiers []string
+	for {
+		tok, err := l.NextToken()
+		if err != nil {
+			return nil, err
+		}
+		if tok.Type == tokens.TokenEof {
+			break
+		}
+		if tok.Type == tokens.TokenDollar {
+			nextTok, err := l.NextToken()
+			if err != nil {
+				return nil, err
+			}
+			// If the token following '$' is an identifier, record it.
+			if nextTok.Type == tokens.TokenIdent {
+				identifiers = append(identifiers, nextTok.Literal)
+			}
+		}
+	}
+	return identifiers, nil
+}
