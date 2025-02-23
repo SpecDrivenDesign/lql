@@ -449,13 +449,19 @@ func (l *Lexer) ExtractContextIdentifiers() ([]string, error) {
 		}
 		if tok.Type == tokens.TokenDollar {
 			nextTok, err := l.NextToken()
+			composed := ""
 			if err != nil {
 				return nil, err
 			}
-			// If the token following '$' is an identifier, record it.
-			if nextTok.Type == tokens.TokenIdent {
-				identifiers = append(identifiers, nextTok.Literal)
+			for nextTok.Type != tokens.TokenEof && (nextTok.Type == tokens.TokenDot || nextTok.Type == tokens.TokenQuestionDot || nextTok.Type == tokens.TokenQuestionBracket || nextTok.Type == tokens.TokenLeftBracket || nextTok.Type == tokens.TokenIdent || nextTok.Type == tokens.TokenString) {
+				if nextTok.Type == tokens.TokenIdent || nextTok.Type == tokens.TokenString {
+					composed += "." + nextTok.Literal
+				}
+				nextTok, err = l.NextToken()
+
 			}
+
+			identifiers = append(identifiers, composed[1:])
 		}
 	}
 	return identifiers, nil
