@@ -453,9 +453,12 @@ func (l *Lexer) ExtractContextIdentifiers() ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			for nextTok.Type != tokens.TokenEof && (nextTok.Type == tokens.TokenDot || nextTok.Type == tokens.TokenQuestionDot || nextTok.Type == tokens.TokenQuestionBracket || nextTok.Type == tokens.TokenLeftBracket || nextTok.Type == tokens.TokenIdent || nextTok.Type == tokens.TokenString) {
+			for nextTok.Type != tokens.TokenEof && (nextTok.Type == tokens.TokenDot || nextTok.Type == tokens.TokenQuestionDot || nextTok.Type == tokens.TokenQuestionBracket || nextTok.Type == tokens.TokenLeftBracket || nextTok.Type == tokens.TokenRightBracket || nextTok.Type == tokens.TokenIdent || nextTok.Type == tokens.TokenString || nextTok.Type == tokens.TokenNumber) {
 				if nextTok.Type == tokens.TokenIdent || nextTok.Type == tokens.TokenString {
 					composed += "." + nextTok.Literal
+				}
+				if nextTok.Type == tokens.TokenNumber {
+					composed += ".*"
 				}
 				nextTok, err = l.NextToken()
 
