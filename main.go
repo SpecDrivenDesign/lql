@@ -40,6 +40,7 @@ func main() {
 		fmt.Println("  lql repl -expr \"<expression>\" [-format json|yaml]")
 		fmt.Println("  lql validate -expr \"<expression>\" | -in <file>")
 		fmt.Println("  lql highlight -expr \"<expression>\" [-theme mild|vivid|dracula|solarized]")
+		fmt.Println("  lql export-contexts -expr \"<expression>\" | -in <file>")
 		os.Exit(1)
 	}
 
