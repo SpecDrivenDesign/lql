@@ -40,6 +40,7 @@ func main() {
 		fmt.Println("  lql repl -expr \"<expression>\" [-format json|yaml]")
 		fmt.Println("  lql validate -expr \"<expression>\" | -in <file>")
 		fmt.Println("  lql highlight -expr \"<expression>\" [-theme mild|vivid|dracula|solarized]")
+		fmt.Println("  lql export-contexts -expr \"<expression>\" | -in <file>")
 		os.Exit(1)
 	}
 
@@ -57,6 +58,8 @@ func main() {
 		runValidateCmd()
 	case "highlight":
 		runHighlightCmd()
+	case "export-contexts":
+		runExportContextsCmd()
 	default:
 		fmt.Printf("Unknown subcommand: %s\n", subcommand)
 		os.Exit(1)
@@ -494,4 +497,38 @@ func runHighlightCmd() {
 	highlighted := ast.String()
 	// 5) Print out the final colorized output
 	fmt.Println(highlighted)
+}
+
+func runExportContextsCmd() {
+	exportCmd := flag.NewFlagSet("export-contexts", flag.ExitOnError)
+	expr := exportCmd.String("expr", "", "DSL expression to extract context identifiers from")
+	inFile := exportCmd.String("in", "", "File containing a DSL expression")
+	if err := exportCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error reading command line args: %v\n", err)
+		os.Exit(1)
+	}
+	var expression string
+	if *inFile != "" {
+		data, err := os.ReadFile(*inFile)
+		if err != nil {
+			fmt.Printf("Error reading file: %v\n", err)
+			os.Exit(1)
+		}
+		expression = string(data)
+	} else if *expr != "" {
+		expression = *expr
+	} else {
+		fmt.Println("Either -expr or -in flag must be provided.")
+		exportCmd.Usage()
+		os.Exit(1)
+	}
+	lex := lexer.NewLexer(expression)
+	identifiers, err := lex.ExtractContextIdentifiers()
+	if err != nil {
+		fmt.Printf("Error extracting context identifiers: %v\n", err)
+		os.Exit(1)
+	}
+	for _, id := range identifiers {
+		fmt.Println(id)
+	}
 }
