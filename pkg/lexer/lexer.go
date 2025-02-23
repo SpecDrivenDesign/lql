@@ -463,8 +463,9 @@ func (l *Lexer) ExtractContextIdentifiers() ([]string, error) {
 				nextTok, err = l.NextToken()
 
 			}
-
-			identifiers = append(identifiers, composed[1:])
+			if len(composed) > 0 {
+				identifiers = append(identifiers, composed[1:])
+			}
 		}
 	}
 	return identifiers, nil
